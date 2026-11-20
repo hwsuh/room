@@ -463,7 +463,7 @@ var EXT = (function () {
   var TOKEN_URL = (CFG && CFG.tokenURL) || "https://securetoken.googleapis.com/v1";
   var ROOT = "/mr", POLL = 5000;
   var LOGIN = CFG && (CFG.login === "ws" || CFG.login === "both") ? CFG.login : "code";   // ws = Workspace 계정만 · both = 접속 코드도 · code = 접속 코드만(0.1 의 config.js)
-  var VER = "0.3.0";                                         // build.py 가 넣음
+  var VER = "0.4.0";                                         // build.py 가 넣음
   var api = { onUpdate: null, onDenied: null, version: VER };
 
   function load(k) { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } }
@@ -474,7 +474,9 @@ var EXT = (function () {
   var who = load("mrx.me");             // 접속 코드: {name, code, admin} · Workspace 계정: {ws: 1, id, name, lv, until, pj, tm}
   var IMP = /[#&]imp=1(?:&|$)/.test(location.hash);   // 0.3: Workspace 의 [전환] · [자료 옮기기]로 열림 → 들어간 뒤 사내 자료를 받아 가져오기 창을 띄움
   var T0 = tokenIn(location.hash);      // Workspace 에서 넘어온 연결 표(#t=…). 화면의 다른 코드가 주소를 만지기 전에 꺼내고, 주소에서는 바로 지움
-  if (T0 || IMP) { try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { try { location.hash = ""; } catch (e2) {} } }
+  var PAIR = /[#&]pair=1(?:&|$)/.test(location.hash);   // 0.4: Workspace 의 [연결 코드 만들기]로 열림 → 다른 기기에 넣을 8자리 코드를 만들어 보여 줌 (이 브라우저의 연결은 건드리지 않음)
+  var PT = (/[#&]pt=([A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+)/.exec(location.hash) || [])[1] || "";   // 그 기기에 건넬 연결 표
+  if (T0 || IMP || PAIR) { try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { try { location.hash = ""; } catch (e2) {} } }
   function fail(status, message) { var e = new Error(message || ("HTTP " + status)); e.status = status; return e; }
 
   /* ---------- 통신 ---------- */
@@ -502,7 +504,7 @@ var EXT = (function () {
       save("mrx.me", who);
     }
   }
-  async function link(tok) {                                           // Workspace 가 떼어 준 연결 표 → Firebase 로그인
+  async function custom(tok) {                                         // Workspace 가 떼어 준 연결 표 → Firebase 로그인 표 (저장하지 않음)
     var u = AUTH_URL + "/accounts:signInWithCustomToken?key=" + encodeURIComponent(CFG.apiKey), body = { token: tok, returnSecureToken: true }, r;
     try { r = await http("POST", u, body); } catch (e) { r = await http("POST", u, body, "plain"); }
     if (r.status !== 200 || !r.json || !r.json.idToken) {
@@ -511,7 +513,11 @@ var EXT = (function () {
         : tx("연결 표가 만료되었거나 맞지 않습니다. Workspace 에서 다시 여세요 (서버 PC 의 시계가 틀려도 이렇게 됩니다). ", "The link has expired or is not valid. Open it from Workspace again (a wrong clock on the server PC also causes this). ")) + raw);
     }
     if (claims(r.json.idToken).ws !== 1) throw fail(400, tx("Workspace 의 연결 표가 아닙니다.", "This is not a Workspace link."));
-    keep({ ws: 1, uid: "", idToken: r.json.idToken, refreshToken: r.json.refreshToken, exp: Date.now() + (+r.json.expiresIn || 3600) * 1000 });
+    return r.json;
+  }
+  async function link(tok) {                                           // 이 브라우저를 그 계정으로 연결 (저장)
+    var j = await custom(tok);
+    keep({ ws: 1, uid: "", idToken: j.idToken, refreshToken: j.refreshToken, exp: Date.now() + (+j.expiresIn || 3600) * 1000 });
   }
   async function signUp() {                                            // 익명 계정 만들기 (이 브라우저 전용)
     var u = AUTH_URL + "/accounts:signUp?key=" + encodeURIComponent(CFG.apiKey), r;
@@ -748,9 +754,10 @@ var EXT = (function () {
         '<p id="xNote" style="margin:0 0 10px;color:var(--busy,#b8371a);font-size:13.5px">' + esc(note || "") + "</p>" +
         '<p style="margin:0 0 6px"><b>' + tx("Workspace 계정으로 연결해야 합니다.", "Link with your Workspace account.") + "</b></p>" +
         '<ul style="margin:0 0 12px;padding-left:20px;font-size:14px"><li>' + tx("회사 PC: Workspace 의 [회의실 예약 (인터넷)] → [회의실 예약 열기]", "Office PC: Workspace → Meeting Rooms (internet) → Open meeting rooms") +
-        "</li><li>" + tx("폰: 그 화면의 [QR 보이기]를 누르고 카메라로 찍기", "Phone: press Show QR code there and scan it with the camera") + "</li></ul>" +
-        '<form id="xForm"><label for="xLink" style="font-size:13.5px">' + tx("또는 복사한 연결 주소 붙여넣기", "Or paste a copied link") + "</label>" +
-        '<input id="xLink" autocomplete="off" spellcheck="false" ' + FIELD + ">" +
+        "</li><li>" + tx("폰: 그 화면의 [QR 보이기]를 누르고 카메라로 찍기", "Phone: press Show QR code there and scan it with the camera") +
+        "</li><li>" + tx("카메라를 못 쓰는 기기: 그 화면의 [연결 코드 만들기]로 받은 8자리 코드를 아래에 넣기", "No camera: enter the 8-character code from Make a link code there") + "</li></ul>" +
+        '<form id="xForm"><label for="xLink" style="font-size:13.5px">' + tx("연결 코드 (또는 복사한 연결 주소 붙여넣기)", "Link code (or paste a copied link)") + "</label>" +
+        '<input id="xLink" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" ' + FIELD + ">" +
         '<p id="xMsg" role="alert" style="min-height:1.4em;margin:0 0 10px;color:var(--busy,#b8371a);font-size:13.5px"></p>' +
         '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end">' +
         (LOGIN === "both" ? '<span style="margin-right:auto"><button type="button" id="xUseCode" ' + BTN2 + ">" + tx("접속 코드로 들어가기", "Use the access code") + "</button></span>" : "") +
@@ -760,10 +767,15 @@ var EXT = (function () {
       if (LOGIN === "both") o.querySelector("#xUseCode").onclick = function () { o.remove(); res("code"); };
       o.querySelector("#xForm").onsubmit = async function (ev) {
         ev.preventDefault();
-        var t = tokenIn(o.querySelector("#xLink").value);
-        if (!t) { msg.textContent = tx("연결 주소가 아닙니다. Workspace 화면의 [연결 주소 복사]로 복사한 것을 붙여 넣으세요.", "That is not a link. Paste what Copy link gave you in Workspace."); return; }
+        var raw = o.querySelector("#xLink").value, t = tokenIn(raw), c = t ? "" : codeIn(raw);
+        if (!t && !c) { msg.textContent = tx("연결 코드(8자리)나 연결 주소가 아닙니다. 코드에는 0 · O · 1 · I · L 이 없습니다. Workspace 화면의 [연결 코드 만들기]나 [연결 주소 복사]로 받은 것을 넣으세요.", "That is neither a link code (8 characters) nor a link. Codes never contain 0, O, 1, I or L. Use Make a link code or Copy link in Workspace."); return; }
         go.disabled = true; msg.textContent = "";
-        try { await link(t); o.remove(); res("linked"); }
+        try {
+          if (c) t = await pairTake(c);                                 // 코드 → 연결 표
+          await link(t);
+          if (c) { try { await db("DELETE", "/pair/" + c); } catch (e2) { /* 못 지워도 10분 뒤에는 읽을 수 없음 */ } }
+          o.remove(); res("linked");
+        }
         catch (e) { msg.textContent = e.status === 0 ? await why(e) : (e.message || String(e)); go.disabled = false; }
       };
     });
@@ -877,6 +889,81 @@ var EXT = (function () {
     } else st.textContent = tx("Workspace 의 [회의실 예약 (인터넷)] 화면 → [파일로 내보내기]로 받은 파일을 고르세요.", "Choose the file from Export to file on the Workspace page (Meeting Rooms (internet)).");
   }
 
+  /* ---------- 0.4: 연결 코드 (카메라를 못 쓰는 기기 — 회의실 앞 태블릿 등) ----------
+     PC: Workspace 의 [연결 코드 만들기] → 이 화면이 새 탭으로 열려 8자리 코드를 만들고, 그 기기에 건넬 연결 표를 저장소의 /mr/pair/<코드> 에 10분 동안 넣어 둠.
+     기기: [연결 코드] 칸에 그 코드를 넣으면 표를 꺼내 연결하고, 꺼낸 자리는 지움. 코드를 모르면 그 자리를 읽을 수 없음(목록을 볼 수 없게 규칙이 막음). */
+  var CODE_ABC = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";                    // 헷갈리는 0 · O · 1 · I · L 은 뺌 (31자)
+  function newCode() { var a = new Uint32Array(8), s = "", i; (window.crypto || window.msCrypto).getRandomValues(a); for (i = 0; i < 8; i++) s += CODE_ABC.charAt(a[i] % 31); return s; }
+  function codeIn(text) { var s = String(text == null ? "" : text).toUpperCase().replace(/[\s\-·.]/g, ""); return /^[A-HJKMNP-Z2-9]{8}$/.test(s) ? s : ""; }
+  var codeShow = function (c) { return c.slice(0, 4) + "-" + c.slice(4); };
+  async function pairTake(code) {                                      // 기기 쪽: 코드 → 연결 표 (로그인 전이므로 로그인 표 없이 읽음)
+    var r = await http("GET", DB + ROOT + "/pair/" + code + ".json");
+    if (r.status === 200 && r.json && typeof r.json.t === "string") return r.json.t;
+    if (r.status === 200 || denied(r)) throw fail(404, tx("코드가 맞지 않거나 시간이 지났습니다 (코드는 10분 동안, 한 번만 씁니다). PC 화면의 코드를 다시 확인하세요.", "The code is wrong or has expired (a code works for 10 minutes, once). Check the code on the PC screen."));
+    throw fail(r.status || 0, tx("저장소에 연결할 수 없습니다.", "Cannot reach the database."));
+  }
+  function pairSend() {                                                // PC 쪽: 코드를 만들어 보여 주고, 기기가 받아 갈 때까지 지켜봄
+    var c = claims(PT).claims || {}, lv = { a: tx("관리자", "admin"), v: tx("보기만", "view only") }[c.lv] || tx("예약 가능", "can book");
+    var here = location.origin + location.pathname;
+    var o = box('<h2 id="xTitle" style="margin:0 0 8px;font-size:19px">' + tx("기기 연결 코드", "Device link code") + "</h2>" +
+      '<p id="xPairS" role="status" style="margin:0 0 6px;font-size:14px">' + tx("코드를 만드는 중…", "Making a code…") + "</p>" +
+      '<p id="xPairCode" aria-live="polite" style="margin:6px 0 2px;text-align:center;font:700 40px/1.3 ui-monospace,Consolas,monospace;letter-spacing:.06em;user-select:all;-webkit-user-select:all">&nbsp;</p>' +
+      '<p id="xPairLeft" style="margin:0 0 12px;text-align:center;font-size:14px;color:var(--muted,#666)">&nbsp;</p>' +
+      '<ol id="xPairHow" style="margin:0 0 10px;padding-left:20px;font-size:14px"><li>' + tx("연결할 기기에서 이 주소를 엽니다: ", "On the device to link, open this address: ") + '<b style="overflow-wrap:anywhere">' + esc(here) + "</b></li><li>" +
+      tx("뜨는 창의 [연결 코드] 칸에 위 코드를 넣고 [연결]을 누릅니다.", "In the window that appears, type the code above into Link code and press Link.") + "</li></ol>" +
+      '<p id="xPairNote" style="margin:0 0 10px;font-size:13.5px">' + tx("이 코드를 넣은 기기는 ", "The device that enters this code is linked as ") + '<b id="xPairWho">' + esc(String(c.n || "")) + " (" + esc(lv) + ")</b>" + tx(" 계정으로 연결됩니다. 내가 연결하려는 기기에만 넣으세요.", ". Enter it only on the device you mean to link.") + "</p>" +
+      '<p id="xMsg" role="alert" style="min-height:1.4em;margin:0 0 10px;color:var(--busy,#b8371a);font-size:13.5px"></p>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button type="button" id="xCancel" ' + BTN2 + ">" + tx("코드 지우고 닫기", "Delete the code and close") + "</button></div>" +
+      '<p style="margin:12px 0 0;font-size:12.5px;color:var(--muted,#666)"><span id="xVer">v' + VER + "</span></p>");
+    var st = o.querySelector("#xPairS"), msg = o.querySelector("#xMsg"), big = o.querySelector("#xPairCode"), left = o.querySelector("#xPairLeft"), btn = o.querySelector("#xCancel");
+    var idTok = "", code = "", url = "", end = 0, tick = null, watch = null, state = "start";
+    function stop() { clearInterval(tick); clearInterval(watch); tick = watch = null; }
+    function finish(kind, text) {                                      // done = 기기가 받아 감 · gone = 지움/시간 지남 · fail = 만들지 못함
+      state = kind; stop(); left.innerHTML = "&nbsp;"; btn.textContent = tx("닫기", "Close"); o.querySelector("#xPairHow").hidden = true; o.querySelector("#xPairNote").hidden = kind !== "done" ? true : false;
+      if (kind === "done") o.querySelector("#xPairNote").textContent = tx("연결된 계정: ", "Linked as: ") + o.querySelector("#xPairWho").textContent;
+      if (kind !== "done") { big.style.opacity = ".35"; big.style.textDecoration = kind === "gone" ? "line-through" : "none"; }
+      if (kind === "done") { st.textContent = text; st.style.color = "var(--free,#2e7d5b)"; st.style.fontWeight = "700"; } else { st.textContent = ""; msg.textContent = text; }
+    }
+    async function drop() { if (!url) return; try { await send("DELETE", url); } catch (e) { /* 10분이 지나면 어차피 읽을 수 없음 */ } }
+    btn.onclick = async function () {
+      btn.disabled = true;
+      var was = state;
+      if (was === "wait") { stop(); await drop(); finish("gone", tx("코드를 지웠습니다.", "The code was deleted.")); }
+      try { window.close(); } catch (e) {}
+      setTimeout(function () { btn.hidden = true; left.textContent = tx("이 탭을 닫으세요.", "Close this tab."); }, 400);   // 브라우저가 스스로 닫지 못하게 한 경우
+    };
+    (async function () {
+      try {
+        if (!T0 || !PT) throw fail(400, tx("Workspace 의 [연결 코드 만들기]로 다시 여세요.", "Open this again with Make a link code in Workspace."));
+        var t = T0; T0 = "";
+        idTok = (await custom(t)).idToken;                              // 메모리에서만 씀 — 이 브라우저에 저장된 내 연결은 그대로
+        code = newCode(); url = DB + ROOT + "/pair/" + code + ".json?auth=" + encodeURIComponent(idTok);
+        var r = await send("PUT", url, { t: PT, at: { ".sv": "timestamp" } });
+        if (denied(r)) { url = ""; throw fail(403, tx("저장소가 받지 않았습니다. Firebase 의 보안 규칙이 예전 것입니다 — 받은 묶음의 database.rules.json 을 Firebase 콘솔 → Realtime Database → Rules 에 다시 붙여 넣고 [Publish] 하세요 (설치 안내 9번).", "The database refused. The Firebase security rules are an older version — paste database.rules.json from the package into the Firebase console → Realtime Database → Rules and press Publish (Setup guide, step 9).")); }
+        if (r.status !== 200) { url = ""; throw fail(r.status || 0, tx("저장소에 연결할 수 없습니다.", "Cannot reach the database.")); }
+        PT = "";
+      } catch (e) { finish("fail", e.status === 0 ? await why(e) : (e.message || String(e))); return; }
+      state = "wait"; end = Date.now() + 590000; big.textContent = codeShow(code);
+      st.textContent = tx("아래 코드를 연결할 기기에 넣으세요. 기기가 받아 가면 여기에 표시됩니다.", "Enter the code below on the device. This window shows when the device has taken it.");
+      var show = function () { var n = Math.max(0, Math.round((end - Date.now()) / 1000)); left.textContent = tx("남은 시간 ", "Time left ") + Math.floor(n / 60) + ":" + (n % 60 < 10 ? "0" : "") + (n % 60); };
+      show(); tick = setInterval(async function () {
+        if (state !== "wait") return;
+        show();
+        if (Date.now() >= end) { stop(); await drop(); finish("gone", tx("시간이 지나 코드를 지웠습니다. Workspace 에서 다시 만드세요.", "The code expired and was deleted. Make a new one in Workspace.")); }
+      }, 1000);
+      var busy = false;
+      watch = setInterval(async function () {
+        if (state !== "wait" || busy) return;
+        busy = true;
+        try {
+          var g = await http("GET", url);
+          if (state === "wait" && g.status === 200 && g.json === null) finish("done", tx("✓ 기기가 연결되었습니다. 이 탭은 닫아도 됩니다.", "✓ The device is linked. You can close this tab."));
+        } catch (e) { /* 잠깐 끊김: 다음에 다시 */ }
+        busy = false;
+      }, 2000);
+    })();
+  }
+
   function setup() {                                                   // config.js 가 아직 없을 때: 설정 파일을 만들어 주는 화면
     var o = box('<h2 id="xTitle" style="margin:0 0 6px;font-size:19px">처음 설정 · First setup</h2>' +
       '<p style="margin:0 0 10px;font-size:13.5px">이 화면은 아직 저장소(Firebase)와 연결되지 않았습니다. 아래에서 설정 파일 두 개를 만들어 <b>Setup_Guide.html</b>(설치 안내)의 순서대로 쓰세요. <span id="xVer" style="color:var(--muted,#666)">v' + VER + '</span></p>' +
@@ -910,6 +997,7 @@ var EXT = (function () {
   api.me = meOut;
   api.ready = async function () {
     if (!CFG || !CFG.apiKey || !DB) { setup(); return new Promise(function () {}); }
+    if (PAIR) { pairSend(); return new Promise(function () {}); }     // 0.4: 연결 코드를 만드는 탭 — 예약 화면으로 들어가지 않고, 저장된 연결도 바꾸지 않음
     var note = "";
     if (T0) { var t = T0; T0 = ""; try { await link(t); } catch (e) { note = e.status === 0 ? await why(e) : (e.message || String(e)); } }   // Workspace 에서 넘어옴: 그 표로 로그인
     for (;;) {
