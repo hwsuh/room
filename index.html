@@ -1,0 +1,2131 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>회의실 예약</title>
+<style>
+/* Layout idea: the paper sign-up sheet, kept as a sheet. Day = rooms across, week = days across, month = wall calendar, door = one room's sign. */
+:root {
+  --bg: #eef1f4;
+  --sheet: #ffffff;
+  --ink: #17212b;
+  --muted: #5d6b79;
+  --line: #d5dce3;
+  --line-strong: #aab5c0;
+  --accent: #1f5fbf;
+  --accent-ink: #ffffff;
+  --accent-soft: #dfeafb;
+  --accent-strong: var(--accent);   /* 흰 글자를 올리는 채움 · 강조색 글자 (4.5:1 이상이 되도록 테마가 따로 정할 수 있음) */
+  --other: #e9edf1;
+  --other-stripe: #6b7a89;
+  --free: #1d7a4f;
+  --free-soft: #dff2e8;
+  --busy: #b4491f;
+  --busy-soft: #fbe6dc;
+  --now: #d2341f;
+  --font-display: "Gothic A1", "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --row: 40px;
+  --head: 48px;
+  --timecol: 60px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #12171c; --sheet: #1a2129; --ink: #e6ebf0; --muted: #94a2b0;
+    --line: #2b3540; --line-strong: #46535f;
+    --accent: #6ea6f5; --accent-ink: #0c1622; --accent-soft: #1e3352;
+    --other: #252e38; --other-stripe: #8695a4;
+    --free: #5fcb95; --free-soft: #173326; --busy: #f0966c; --busy-soft: #3a2218; --now: #ff6b57;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #12171c; --sheet: #1a2129; --ink: #e6ebf0; --muted: #94a2b0;
+  --line: #2b3540; --line-strong: #46535f;
+  --accent: #6ea6f5; --accent-ink: #0c1622; --accent-soft: #1e3352;
+  --other: #252e38; --other-stripe: #8695a4;
+  --free: #5fcb95; --free-soft: #173326; --busy: #f0966c; --busy-soft: #3a2218; --now: #ff6b57;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+.wrap { max-width: 1600px; margin: 0 auto; padding: 20px 16px 40px; display: flex; flex-direction: column; gap: 14px; }   /* 1.41: 1100 → 1600px (넓은 모니터에서 더 넓게) */
+.wrap[data-view="month"] { padding-bottom: 16px; }                    /* 월간은 한 화면에 맞추므로 아래 여백을 줄임 */
+
+.top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+h1 { font-family: var(--font-display); font-weight: 800; font-size: 24px; margin: 0; letter-spacing: -0.01em; }
+.nav, .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.datelabel { font-family: var(--font-display); font-weight: 700; font-size: 18px; min-width: 9.5em; text-align: center; border: 0; background: transparent; color: inherit; border-radius: 6px; padding: 4px 6px; cursor: pointer; }
+.datelabel:hover { background: var(--accent-soft); }
+.tools.right { position: relative; }
+#tMore { display: none; }
+.menu { display: contents; }
+.btn { border: 1px solid var(--line-strong); background: var(--sheet); border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--accent-ink); font-weight: 600; }
+.btn.danger { color: var(--busy); border-color: var(--busy); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.icon { padding: 7px 10px; font-family: var(--font-mono); }
+.btn.small { padding: 3px 9px; font-size: 13px; }
+.linkbtn { border: 0; background: transparent; padding: 2px 0; min-height: 24px; color: var(--accent-strong); cursor: pointer; font-size: 13px; text-decoration: underline; text-align: left; }
+input[type="date"], input[type="text"], input[type="number"], select {
+  border: 1px solid var(--line-strong); background: var(--sheet); border-radius: 6px; padding: 7px 10px;
+}
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; background: var(--sheet); }
+.seg button { border: 0; background: transparent; padding: 7px 14px; cursor: pointer; border-right: 1px solid var(--line); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent-strong); color: var(--accent-ink); font-weight: 600; }
+
+.notice { background: var(--busy-soft); color: var(--ink); border-left: 4px solid var(--busy); padding: 10px 14px; border-radius: 4px; }
+
+.status { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.chip { background: var(--sheet); border: 1px solid var(--line); border-left: 5px solid var(--free); border-radius: 6px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.chip.busy { border-left-color: var(--busy); }
+.chip .room { font-weight: 600; }
+.chip .state { font-size: 13px; font-weight: 600; color: var(--free); }
+.chip.busy .state { color: var(--busy); }
+.chip .sub { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.hint { color: var(--muted); font-size: 13px; margin: 0; }
+.sheetbox { background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; }
+.grid { display: grid; position: relative; min-width: max-content;
+  grid-template-columns: var(--timecol) repeat(var(--n), minmax(var(--colmin, 140px), 1fr));
+  grid-template-rows: minmax(var(--head), auto) repeat(var(--rows), var(--row)); }
+.corner, .time { position: sticky; left: 0; z-index: 3; background: var(--sheet); border-right: 1px solid var(--line-strong); }
+.corner { border-bottom: 1px solid var(--line-strong); }
+.colhead { border-bottom: 1px solid var(--line-strong); border-left: 1px solid var(--line); padding: 6px 10px; display: flex; flex-direction: column; justify-content: center; max-width: 260px; }
+.colhead b { font-weight: 600; overflow-wrap: anywhere; line-height: 1.2; }
+.colhead span { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.colhead.today { background: var(--accent-soft); box-shadow: inset 0 -3px 0 var(--accent); }   /* 오늘: 옅은 바탕 + 아래 줄 (글자는 본문색 — 옅은 바탕 위 강조색 글자는 대비가 모자람) */
+.colhead.today b { color: var(--ink); }
+.colhead.today span, .wk-day.today span { color: var(--ink); }                                      /* 옅은 바탕 위 회색 글자는 4.48:1 이라 본문색으로 */
+.colhead.link { cursor: pointer; }
+.time { font-family: var(--font-mono); font-size: 12px; color: var(--muted); text-align: right; padding: 2px 8px 0 0; font-variant-numeric: tabular-nums; border-top: 1px solid var(--line-strong); }
+.cell { border: 0; border-left: 1px solid var(--line); border-top: 1px dashed var(--line); background: transparent; cursor: pointer; color: var(--ink); font-size: 12px; text-align: left; padding: 0 0 0 8px; }
+.cell.hour { border-top: 1px solid var(--line-strong); }
+.cell span { opacity: 0; }
+.cell:hover:not(:disabled), .cell:focus-visible { background: var(--accent-soft); }
+.cell:hover:not(:disabled) span, .cell:focus-visible span { opacity: 1; }
+.cell:disabled { cursor: default; }
+.cell.past { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--other) 6px 7px); }
+.bk { z-index: 2; margin: 2px 3px 2px 4px; border-radius: 5px; background: var(--other); border: 0; border-left: 4px solid var(--other-stripe); padding: 3px 8px; text-align: left; cursor: pointer; overflow: hidden; display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.bk.mine { background: var(--accent-soft); border-left-color: var(--accent); }
+.bk.block, .mi.block { background: repeating-linear-gradient(135deg, var(--busy-soft) 0 8px, var(--sheet) 8px 12px); border-left-color: var(--busy); }
+.bk .l1 { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bk .l2 { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk .l2 b { font-weight: 600; }
+.bk .plus { margin-left: auto; font-family: var(--font-body); font-size: 12px; font-weight: 600; background: var(--accent-strong); color: var(--accent-ink); border-radius: 999px; padding: 0 7px; line-height: 18px; }
+.rep { font-family: var(--font-body); font-size: 11px; color: var(--ink); border: 1px solid var(--line-strong); border-radius: 3px; padding: 0 4px; line-height: 15px; }
+.nowline { height: 0; border-top: 2px solid var(--now); z-index: 4; pointer-events: none; align-self: start; position: relative; scroll-margin: 100px 0 140px; }
+.nowline::before { content: ""; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--now); }
+.empty { padding: 36px 20px; text-align: center; color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 12px; }
+
+.month { display: grid; grid-template-columns: repeat(7, minmax(108px, 1fr)); min-width: max-content; }
+.month .wd { padding: 8px 10px; font-size: 13px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--line-strong); border-left: 1px solid var(--line); }
+.month .wd:first-child, .mday:nth-child(7n+1) { border-left: 0; }
+.mday { min-height: 0; overflow: hidden; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 6px; display: flex; flex-direction: column; gap: 3px; cursor: pointer; min-width: 0; }
+.mday:hover { background: var(--accent-soft); }
+.mday.out { background: var(--bg); }
+.mday.out .num { color: var(--muted); }
+.mday .num { align-self: flex-start; border: 0; background: transparent; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13px; padding: 1px 6px; min-width: 24px; min-height: 24px; border-radius: 999px; cursor: pointer; }
+.mday.today .num { background: var(--accent-strong); color: var(--accent-ink); }
+.mi { border: 0; background: var(--other); border-left: 3px solid var(--other-stripe); border-radius: 3px; padding: 1px 6px; font-size: 12px; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; display: block; width: 100%; }
+.mi.mine { background: var(--accent-soft); border-left-color: var(--accent); }
+.mi .mono { font-size: 11px; margin-right: 4px; }
+.more { font-size: 12px; color: var(--muted); padding-left: 6px; }
+.wkall { display: grid; grid-template-columns: minmax(104px, 144px) repeat(var(--n), minmax(124px, 1fr)); min-width: calc(104px + var(--n) * 124px); }
+.wk-corner, .wk-room { position: sticky; left: 0; z-index: 2; background: var(--sheet); border-right: 1px solid var(--line-strong); }
+.wk-corner { border-bottom: 1px solid var(--line-strong); padding: 8px 10px; font-size: 13px; font-weight: 600; color: var(--muted); display: flex; align-items: center; }
+.wk-day { border: 0; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line-strong); background: transparent; color: inherit; font: inherit; text-align: left; padding: 6px 10px; cursor: pointer; display: flex; flex-direction: column; justify-content: center; }
+.wk-day:first-of-type { border-left: 0; }
+.wk-day b { font-weight: 600; line-height: 1.2; }
+.wk-day span, .wk-room span { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.wk-day.today { background: var(--accent-soft); box-shadow: inset 0 -3px 0 var(--accent); }
+.wk-day.today b { color: var(--ink); }
+.wk-day:hover b, .wk-room:hover b { text-decoration: underline; }
+.wk-room { border: 0; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line-strong); color: inherit; font: inherit; text-align: left; padding: 8px 10px; cursor: pointer; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wk-room b { font-weight: 600; overflow-wrap: anywhere; line-height: 1.25; }
+.wk-cell { border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 6px; display: flex; flex-direction: column; gap: 3px; min-height: 84px; min-width: 0; }
+.wk-room + .wk-cell { border-left: 0; }
+.wk-cell.past { background: var(--bg); }
+.wk-bar { position: relative; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-bottom: 2px; flex: none; }
+.wk-bar i { position: absolute; top: 0; bottom: 0; background: var(--other-stripe); }
+.wk-bar i.mine { background: var(--accent); }
+.wk-bar i.block { background: var(--busy); }
+.wi { border: 0; background: var(--other); border-left: 3px solid var(--other-stripe); border-radius: 3px; padding: 2px 6px; font: inherit; font-size: 12px; color: inherit; text-align: left; cursor: pointer; display: block; width: 100%; min-width: 0; }
+.wi.mine { background: var(--accent-soft); border-left-color: var(--accent); }
+.wi.block { background: repeating-linear-gradient(135deg, var(--busy-soft) 0 8px, var(--sheet) 8px 12px); border-left-color: var(--busy); }
+.wi .mono { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wi .rep { font-family: var(--font-body); font-size: 11px; color: var(--ink); }
+.wi .tx { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wi .tx b { font-weight: 600; }
+.wk-add { align-self: flex-start; border: 1px dashed var(--line-strong); background: transparent; color: var(--muted); border-radius: 3px; font: inherit; font-size: 12px; padding: 1px 8px; min-height: 24px; cursor: pointer; margin-top: auto; }
+.wk-add:hover { border-color: var(--accent); color: var(--accent-strong); }
+.wk-full { font-size: 12px; color: var(--muted); padding-left: 2px; margin-top: auto; }
+
+dialog { border: 1px solid var(--line-strong); border-radius: 10px; background: var(--sheet); color: var(--ink); padding: 0; width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
+dialog.wide { width: min(620px, calc(100vw - 32px)); }
+dialog::backdrop { background: rgba(10, 16, 22, .5); }
+.dlg { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.dlg h2 { font-family: var(--font-display); font-weight: 700; font-size: 18px; margin: 0; }
+.dlg h3 { font-size: 14px; font-weight: 600; margin: 0; }
+.dlg .meta { display: flex; flex-direction: column; gap: 2px; }
+.dlg .meta .big { font-family: var(--font-mono); font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field label, .lab { font-size: 13px; color: var(--muted); }
+.field input, .field select { width: 100%; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.why { font-size: 13px; color: var(--muted); margin: 0; }
+.err { font-size: 13px; color: var(--busy); margin: 0; min-height: 1.2em; }
+.warn { font-size: 13px; color: var(--busy); margin: 0; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.opt { border: 1px solid var(--line); border-radius: 6px; }
+.opt > summary { cursor: pointer; padding: 8px 12px; min-height: 40px; font-size: 13px; display: flex; align-items: center; gap: 8px; list-style: none; border-radius: 6px; }
+.opt > summary::-webkit-details-marker { display: none; }
+.opt > summary::before { content: ""; width: 7px; height: 7px; flex: none; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform .15s; }
+.opt[open] > summary::before { transform: rotate(45deg); }
+.opt .optsum { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.opt .optbody { padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 12px; }
+@media (prefers-reduced-motion: reduce) { .opt > summary::before { transition: none; } }
+.checks { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; }
+.checks label { display: inline-flex; align-items: center; gap: 5px; color: var(--ink); }
+.roomset { border: 1px solid var(--line); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.roomrow { display: grid; grid-template-columns: 1fr 76px auto; gap: 8px; align-items: center; }
+.list { display: flex; flex-direction: column; gap: 6px; }
+.item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; background: var(--sheet); text-align: left; }
+button.item { cursor: pointer; width: 100%; }
+button.item:hover { border-color: var(--accent); }
+.item .t { font-weight: 600; overflow-wrap: anywhere; }
+.item .s { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.item > div { min-width: 0; }
+.stat { display: grid; grid-template-columns: minmax(70px, auto) 1fr auto; gap: 6px 10px; align-items: center; font-size: 13px; }
+.meter { height: 10px; background: var(--other); border-radius: 2px; overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+.stat .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+#toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--sheet); padding: 9px 16px; border-radius: 6px; font-size: 14px; z-index: 10; max-width: calc(100vw - 32px); }
+
+.door { max-width: 860px; margin: 0 auto; padding: 20px 16px 40px; display: flex; flex-direction: column; gap: 16px; }
+.doorhead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
+.doorhead .clock { font-family: var(--font-mono); font-size: 20px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.panel { border-radius: 12px; padding: 28px 24px; background: var(--free-soft); border-left: 10px solid var(--free); display: flex; flex-direction: column; gap: 8px; }
+.panel.busy { background: var(--busy-soft); border-left-color: var(--busy); }
+.panel .rname { font-family: var(--font-display); font-weight: 800; font-size: 34px; line-height: 1.15; overflow-wrap: anywhere; }
+.panel .st { font-family: var(--font-display); font-weight: 800; font-size: 56px; line-height: 1.1; color: var(--free); }
+.panel.busy .st { color: var(--busy); }
+.panel .what { font-size: 20px; overflow-wrap: anywhere; }
+.panel .next { font-size: 16px; color: var(--muted); }
+.dooract { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.dooract .btn { padding: 12px 20px; font-size: 17px; }
+.dooract input { padding: 12px; font-size: 16px; width: 11em; }
+.seg.small button { padding: 4px 10px; font-size: 13px; }
+/* 좁은 화면 (1.42): 머리 부분을 줄여 예약표가 위에서 시작하게 — 날짜 글자가 날짜 고르기, 내 예약 · 통계 · 설정 · 사용법은 [더보기] 안으로, 현황은 옆으로 넘겨 봄 */
+@media (max-width: 640px) {
+  .wrap { padding: 12px 10px 32px; gap: 10px; }
+  h1 { font-size: 20px; }
+  .top { gap: 8px; }
+  .top > .tools { justify-content: space-between; width: 100%; }
+  .nav { position: relative; flex-wrap: nowrap; gap: 6px; width: 100%; }
+  .datelabel { order: -1; flex: 1; min-width: 0; text-align: left; font-size: 17px; padding-left: 2px; }
+  html:not(.nopicker) #pick { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; min-height: 0; opacity: 0; padding: 0; border: 0; pointer-events: none; }
+  .bar { gap: 8px; }
+  .bar .btn, .bar .seg button { padding: 7px 9px; font-size: 14px; }
+  .tools.right { margin-left: auto; gap: 6px; }
+  #tMore { display: inline-flex; align-items: center; }
+  .menu { display: none; position: absolute; right: 0; top: calc(100% + 6px); z-index: 6; min-width: 190px; flex-direction: column; gap: 6px; padding: 8px;
+    background: var(--sheet); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
+  .menu.open { display: flex; }
+  .menu .btn { width: 100%; text-align: left; }
+  .status { display: flex; overflow-x: auto; gap: 8px; padding-bottom: 2px; scroll-snap-type: x proximity; }
+  .status .chip { flex: 0 0 250px; scroll-snap-align: start; padding: 2px 10px 8px; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; row-gap: 0; align-items: center; }
+  .status .chip .room { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status .chip .linkbtn { grid-column: 2; grid-row: 1; min-height: 36px; }
+  .status .chip .state, .status .chip .sub { grid-column: 1 / -1; }
+  .status .chip .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hint { font-size: 12px; line-height: 1.4; }
+  .kbd { display: none; }
+  .panel .st { font-size: 40px; }
+}
+/* 손가락으로 누르는 화면: 조작 요소를 44px 이상으로 */
+@media (max-width: 640px), (pointer: coarse) {
+  :root { --row: 44px; }
+  .btn, .seg button, .seg.small button, .datelabel, input[type="date"], input[type="text"], input[type="number"], select { min-height: 44px; }
+  .btn.icon { min-width: 44px; }
+  .btn.small { padding: 3px 12px; }
+  .linkbtn { min-height: 44px; }
+  .opt > summary { min-height: 44px; }
+  .checks label { min-height: 44px; }
+  .checks input { width: 20px; height: 20px; }
+  .wk-add { min-height: 32px; padding: 4px 10px; }
+}
+@media (pointer: coarse) { .kbd { display: none; } }
+.stat { grid-template-columns: minmax(70px, 34%) 1fr auto; }
+.stat .k { overflow-wrap: anywhere; }
+</style>
+<meta name="theme-color" content="#1C1C1E">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="회의실 예약">
+<style id="lw-theme">
+body{word-break:keep-all;overflow-wrap:break-word}
+.checks label{white-space:nowrap;flex:none}
+:root{--bg:#F7F6F2;--sheet:#FFFFFF;--ink:#1C1C1E;--muted:#6B6E76;--line:#E3E0D8;--line-strong:#C9C4BA;
+  --accent:#E85A2C;--accent-ink:#FFFFFF;--accent-soft:#FDEDE6;--accent-strong:#C2461F;--other:#EFEDE8;--other-stripe:#8A8780;
+  --free:#2E7D5B;--free-soft:#E5F3EC;--busy:#B8371A;--busy-soft:#FBE7E1;--now:#E85A2C;
+  --font-display:"Malgun Gothic","맑은 고딕","Apple SD Gothic Neo","Noto Sans KR","Segoe UI",system-ui,sans-serif;--font-body:"Malgun Gothic","맑은 고딕","Apple SD Gothic Neo","Noto Sans KR","Segoe UI",system-ui,sans-serif;--font-mono:Consolas,"D2Coding",ui-monospace,"SFMono-Regular",monospace}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#161618;--sheet:#1F1F22;--ink:#F2F1EE;--muted:#A3A39E;
+  --line:#34343A;--line-strong:#4A4A50;--accent:#FF6A3D;--accent-ink:#1C1C1E;--accent-soft:#3A2219;--accent-strong:#FF6A3D;--now:#FF6A3D;--other:#2A2A2E;--free:#5FC596;--free-soft:#183528;--busy:#F0966C;--busy-soft:#3A2218}}
+:root[data-theme="dark"]{--bg:#161618;--sheet:#1F1F22;--ink:#F2F1EE;--muted:#A3A39E;--line:#34343A;--line-strong:#4A4A50;
+  --accent:#FF6A3D;--accent-ink:#1C1C1E;--accent-soft:#3A2219;--accent-strong:#FF6A3D;--now:#FF6A3D;--other:#2A2A2E;--free:#5FC596;--free-soft:#183528;--busy:#F0966C;--busy-soft:#3A2218}
+</style>
+</head>
+<body>
+<div class="wrap" id="main">
+  <header class="top">
+    <div class="tools">
+      <h1 data-t="title"></h1>
+      <div class="seg small" id="langs" role="group" aria-label="Language / 언어">
+        <button type="button" data-lang="ko">한국어</button>
+        <button type="button" data-lang="en">English</button>
+      </div>
+    </div>
+    <div class="nav">
+      <button class="btn icon" id="prev" data-ta="prev">&lt;</button>
+      <button type="button" class="datelabel" id="datelabel"></button>
+      <button class="btn icon" id="next" data-ta="next">&gt;</button>
+      <button class="btn" id="today" data-t="today"></button>
+      <input type="date" id="pick" data-ta="pickDate">
+    </div>
+  </header>
+
+  <div class="bar">
+    <div class="seg" id="views" role="group" data-ta="viewMode">
+      <button type="button" data-view="day" data-t="vDay"></button>
+      <button type="button" data-view="week" data-t="vWeek"></button>
+      <button type="button" data-view="month" data-t="vMonth"></button>
+    </div>
+    <div class="seg" id="roomseg" role="group" data-ta="lRoom" hidden></div>
+    <div class="tools right">
+      <button class="btn primary" id="tFind" data-t="find"></button>
+      <button class="btn" id="tMore" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="morePanel" data-t="moreMenu"></button>
+      <div class="menu" id="morePanel">
+        <button class="btn" id="tMine" data-t="mine"></button>
+        <button class="btn" id="tStat" data-t="stats"></button>
+        <button class="btn" id="settings" data-t="settings" hidden></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="notice" id="notice" hidden></div>
+  <section class="status" id="status" data-ta="statusAria"></section>
+  <p class="hint" id="hint"></p>
+  <div class="sheetbox"><div id="sheet"></div></div>
+</div>
+<div class="door" id="door" hidden></div>
+
+<dialog id="dBook" aria-labelledby="bHead"><form class="dlg" id="fBook">
+  <h2 id="bHead"></h2>
+  <div class="two">
+    <div class="field"><label for="bRoom" data-t="lRoom"></label><select id="bRoom"></select></div>
+    <div class="field"><label for="bDate" data-t="lDate"></label><input type="date" id="bDate" required></div>
+  </div>
+  <div class="two">
+    <div class="field"><label for="bStart" data-t="lStart"></label><select id="bStart"></select></div>
+    <div class="field"><label for="bDur" data-t="lDur"></label><select id="bDur"></select></div>
+  </div>
+  <div class="two">
+    <div class="field"><label for="bName" data-t="lName"></label><input type="text" id="bName" maxlength="20" required data-tp="phName"></div>
+    <div class="field"><label for="bTitle" id="bTitleLab"></label><input type="text" id="bTitle" maxlength="40" data-tp="phTitle"></div>
+  </div>
+  <details class="opt" id="bMore">
+    <summary><span data-t="optMore"></span><span class="optsum" id="bMoreSum"></span></summary>
+    <div class="optbody">
+      <div class="two" id="bRepRow">
+        <div class="field"><label for="bRep" data-t="lRep"></label><select id="bRep"></select></div>
+        <div class="field" id="bUntilBox" hidden><label for="bUntil" data-t="lUntil"></label><input type="date" id="bUntil"></div>
+      </div>
+      <div class="two">
+        <div class="field"><label for="bProject" data-t="lProjectOpt"></label><input type="text" id="bProject" maxlength="30" list="plist"><datalist id="plist"></datalist></div>
+        <div class="field"><label for="bTeam" data-t="lTeamOpt"></label><input type="text" id="bTeam" maxlength="30" list="tlist"><datalist id="tlist"></datalist></div>
+      </div>
+      <div class="two">
+        <div class="field"><label for="bN" data-t="lN"></label><input type="number" id="bN" min="1" max="999"></div>
+      </div>
+      <div class="checks" id="bBlockBox" hidden><label><input type="checkbox" id="bBlock"> <span data-t="blockChk"></span></label></div>
+    </div>
+  </details>
+  <p class="warn" id="bWarn" hidden></p>
+  <p class="why" id="bNote" data-t="detachNote" hidden></p>
+  <p class="err" id="bErr"></p>
+  <div class="row"><button type="button" class="btn" data-close data-t="close"></button><button class="btn primary" id="bSave"></button></div>
+</form></dialog>
+
+<dialog id="dView" aria-labelledby="vTitle"><div class="dlg">
+  <h2 id="vTitle"></h2>
+  <div class="meta"><span id="vRoom"></span><span class="big" id="vTime"></span><span id="vName"></span><span class="why" id="vGroup"></span><span class="why" id="vRep"></span></div>
+  <p class="why" id="vWhy"></p>
+  <p class="err" id="vErr"></p>
+  <div class="row">
+    <button type="button" class="btn" data-close data-t="close"></button>
+    <button type="button" class="btn danger" id="vCancelAll" hidden></button>
+    <button type="button" class="btn danger" id="vCancel"></button>
+    <button type="button" class="btn" id="vEdit" data-t="edit"></button>
+    <button type="button" class="btn" id="vEnd" data-t="endNow" hidden></button>
+    <button type="button" class="btn primary" id="vExtend"></button>
+  </div>
+</div></dialog>
+
+<dialog id="dFind" aria-labelledby="fHead"><form class="dlg" id="fFind">
+  <h2 id="fHead" data-t="find"></h2>
+  <div class="two">
+    <div class="field"><label for="fDate" data-t="lDate"></label><input type="date" id="fDate" required></div>
+    <div class="field"><label for="fStart" data-t="lStart"></label><select id="fStart"></select></div>
+  </div>
+  <div class="two">
+    <div class="field"><label for="fDur" data-t="lDur"></label><select id="fDur"></select></div>
+    <div class="field"><label for="fCap" data-t="lN"></label><input type="number" id="fCap" min="1" max="999"></div>
+  </div>
+  <div class="field"><span class="lab" data-t="lEq"></span><div class="checks" id="fEq"></div></div>
+  <div class="row"><button type="button" class="btn" data-close data-t="close"></button><button class="btn primary" data-t="search"></button></div>
+  <p class="why" id="fMsg"></p>
+  <div class="list" id="fList"></div>
+</form></dialog>
+
+<dialog id="dMine" aria-labelledby="mHead"><div class="dlg">
+  <h2 id="mHead" data-t="mine"></h2>
+  <p class="why" id="mMsg"></p>
+  <div class="list" id="mList"></div>
+  <div class="row"><button type="button" class="btn" data-close data-t="close"></button></div>
+</div></dialog>
+
+<dialog id="dStat" class="wide" aria-labelledby="stHead"><div class="dlg">
+  <h2 id="stHead"></h2>
+  <div class="seg" id="stTabs" role="group" data-ta="stats">
+    <button type="button" data-tab="room" data-t="sRoom"></button>
+    <button type="button" data-tab="project" data-t="sProject"></button>
+    <button type="button" data-tab="team" data-t="sTeam"></button>
+    <button type="button" data-tab="user" data-t="sUser"></button>
+    <button type="button" data-tab="hour" data-t="sHour"></button>
+  </div>
+  <p class="why" id="stMsg"></p>
+  <div class="stat" id="stBody"></div>
+  <div class="row"><button type="button" class="btn" data-close data-t="close"></button></div>
+</div></dialog>
+
+<dialog id="dSet" class="wide" aria-labelledby="sHead"><form class="dlg" id="fSet">
+  <h2 id="sHead" data-t="settings"></h2>
+  <div class="field"><span class="lab" data-t="lRooms"></span><div id="sRooms" class="list"></div></div>
+  <div><button type="button" class="btn" id="sAdd" data-t="addRoom"></button></div>
+  <div class="two">
+    <div class="field"><label for="sStart" data-t="lOpen"></label><select id="sStart"></select></div>
+    <div class="field"><label for="sEnd" data-t="lClose"></label><select id="sEnd"></select></div>
+  </div>
+  <div class="two">
+    <div class="field"><label for="sMaxDur" data-t="lMaxDur"></label><select id="sMaxDur"></select></div>
+    <div class="field"><label for="sAhead" data-t="lAhead"></label><select id="sAhead"></select></div>
+  </div>
+  <p class="why" data-t="ruleNote"></p>
+  <div class="field"><label for="sProjects" data-t="lProjects"></label><input type="text" id="sProjects" maxlength="600"></div>
+  <div class="field"><label for="sTeams" data-t="lTeams"></label><input type="text" id="sTeams" maxlength="600"></div>
+  <p class="err" id="sErr"></p>
+  <div class="row"><button type="button" class="btn" data-close data-t="close"></button><button class="btn primary" data-t="save"></button></div>
+</form></dialog>
+
+<div id="toast" hidden role="status"></div>
+
+<script src="config.js"></script>
+<script>
+/* 회의실 예약 — 바깥(인터넷) 판의 저장 · 로그인 (결정 101)
+   Workspace 서버 대신 Firebase Realtime Database 에 저장합니다. 화면(예약 로직)은 Workspace 판과 같은 원본에서 만들고,
+   그 원본이 쓰는 저장 함수(LW.store 의 get · set · update · watch)만 여기서 같은 모양으로 다시 만듭니다 → meeting-room-shim.js 를 그대로 씀.
+
+   자료 모양 (/mr 아래)
+     secret/{code, admin}        접속 코드 · 관리자 코드. Firebase 콘솔에서만 넣고 바꿈 (규칙이 읽기 · 쓰기를 모두 막음)
+     members/<uid>/{name, code, admin?, at}   이 브라우저의 익명 계정이 '코드를 맞게 넣었다'는 표시. 규칙이 secret 과 같은지 봄
+     d/<key>/{r, v}              문서 하나 = 판 번호 r + JSON 글자 v   (key: config_main · series · days_YYYY-MM · lock)
+     r/<key>                     그 문서의 판 번호만 (바뀐 것만 다시 받으려고 이것을 봄 — 쓰는 중 5초마다, 쉬면 더 드물게)
+   동시에 고치기: 쓰는 쪽이 r+1 을 보내고, 규칙이 '지금 r 보다 정확히 1 큰 것'만 받음 → 늦은 쪽은 거절되고 다시 읽어 다시 씀.
+   Firebase SDK 를 쓰지 않고 fetch 만 씁니다 (회사 프록시를 잘 지나가고, 파일 하나로 끝남). */
+var EXT = (function () {
+  "use strict";
+  var CFG = window.MR_CONFIG || null;
+  var DB = CFG ? String(CFG.databaseURL || "").replace(/\/+$/, "") : "";
+  var AUTH_URL = (CFG && CFG.authURL) || "https://identitytoolkit.googleapis.com/v1";
+  var TOKEN_URL = (CFG && CFG.tokenURL) || "https://securetoken.googleapis.com/v1";
+  var ROOT = "/mr", POLL = 5000;
+  var LOGIN = CFG && (CFG.login === "ws" || CFG.login === "both") ? CFG.login : "code";   // ws = Workspace 계정만 · both = 접속 코드도 · code = 접속 코드만(0.1 의 config.js)
+  var VER = "0.2.0";                                         // build.py 가 넣음
+  var api = { onUpdate: null, onDenied: null, version: VER };
+
+  function load(k) { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } }
+  function save(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 저장이 막힌 브라우저: 탭을 닫으면 다시 물음 */ } }
+  var en = function () { try { return localStorage.getItem("roomBookLang") === "en"; } catch (e) { return false; } };
+  var tx = function (ko, e) { return en() ? e : ko; };
+  var auth = load("mrx.auth");          // {uid, idToken, refreshToken, exp, at, ws?}
+  var who = load("mrx.me");             // 접속 코드: {name, code, admin} · Workspace 계정: {ws: 1, id, name, lv, until, pj, tm}
+  var T0 = tokenIn(location.hash);      // Workspace 에서 넘어온 연결 표(#t=…). 화면의 다른 코드가 주소를 만지기 전에 꺼내고, 주소에서는 바로 지움
+  if (T0) { try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { try { location.hash = ""; } catch (e2) {} } }
+  function fail(status, message) { var e = new Error(message || ("HTTP " + status)); e.status = status; return e; }
+
+  /* ---------- 통신 ---------- */
+  async function http(method, url, body, kind) {                       // kind: 없음 = JSON · "form" · "plain"(브라우저가 미리 묻지 않는 단순 요청)
+    var ctl = ("AbortController" in window) ? new AbortController() : null, timer = setTimeout(function () { if (ctl) ctl.abort(); }, 20000);
+    var opt = { method: method, cache: "no-store", signal: ctl ? ctl.signal : undefined };
+    if (body !== undefined) {
+      opt.body = kind === "form" ? body : JSON.stringify(body);
+      if (kind !== "plain") opt.headers = { "Content-Type": kind === "form" ? "application/x-www-form-urlencoded" : "application/json" };
+    }
+    var r;
+    try { r = await fetch(url, opt); } catch (e) { clearTimeout(timer); var f = fail(0, tx("인터넷 연결을 확인하세요.", "Check the internet connection.")); f.url = url; throw f; }
+    clearTimeout(timer);
+    var j = null; try { j = await r.json(); } catch (e) { /* 본문 없음 */ }
+    return { status: r.status, json: j };
+  }
+  function claims(t) {                                                 // 로그인 표(JWT) 가운데 토막
+    try { var p = String(t).split(".")[1].replace(/-/g, "+").replace(/_/g, "/"); while (p.length % 4) p += "="; return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(p), function (c) { return c.charCodeAt(0); }))) || {}; } catch (e) { return {}; }
+  }
+  function keep(a) {
+    a.at = Date.now(); auth = a; save("mrx.auth", a);
+    if (a.ws) {                                                        // Workspace 계정: 이름 · 등급 · 기한은 표에 적힌 것(서버가 서명) — 화면에서 바꿀 수 없음
+      var c = claims(a.idToken), uid = String(c.user_id || c.sub || a.uid || ""), m = /^ws:(\d+)$/.exec(uid);
+      who = { ws: 1, id: m ? +m[1] : uid, name: String(c.n || ""), lv: c.lv === "a" || c.lv === "v" ? c.lv : "u", until: +c.until || 0, pj: String(c.pj || ""), tm: String(c.tm || "") };
+      save("mrx.me", who);
+    }
+  }
+  async function link(tok) {                                           // Workspace 가 떼어 준 연결 표 → Firebase 로그인
+    var u = AUTH_URL + "/accounts:signInWithCustomToken?key=" + encodeURIComponent(CFG.apiKey), body = { token: tok, returnSecureToken: true }, r;
+    try { r = await http("POST", u, body); } catch (e) { r = await http("POST", u, body, "plain"); }
+    if (r.status !== 200 || !r.json || !r.json.idToken) {
+      var raw = String((r.json && r.json.error && r.json.error.message) || "");
+      throw fail(r.status || 500, (/CREDENTIAL_MISMATCH/.test(raw) ? tx("서버 PC 의 키 파일이 이 Firebase 프로젝트의 것이 아닙니다. ", "The key file on the server PC belongs to a different Firebase project. ")
+        : tx("연결 표가 만료되었거나 맞지 않습니다. Workspace 에서 다시 여세요 (서버 PC 의 시계가 틀려도 이렇게 됩니다). ", "The link has expired or is not valid. Open it from Workspace again (a wrong clock on the server PC also causes this). ")) + raw);
+    }
+    if (claims(r.json.idToken).ws !== 1) throw fail(400, tx("Workspace 의 연결 표가 아닙니다.", "This is not a Workspace link."));
+    keep({ ws: 1, uid: "", idToken: r.json.idToken, refreshToken: r.json.refreshToken, exp: Date.now() + (+r.json.expiresIn || 3600) * 1000 });
+  }
+  async function signUp() {                                            // 익명 계정 만들기 (이 브라우저 전용)
+    var u = AUTH_URL + "/accounts:signUp?key=" + encodeURIComponent(CFG.apiKey), r;
+    try { r = await http("POST", u, { returnSecureToken: true }); }
+    catch (e) { r = await http("POST", u, { returnSecureToken: true }, "plain"); }      // 미리 묻기가 길에서 막힌 경우를 대비해 한 번 더
+    if (r.status !== 200 || !r.json || !r.json.idToken) throw fail(r.status || 500, tx("로그인 서버가 거절했습니다 (Firebase 의 '익명' 로그인이 켜져 있는지 확인). ", "The sign-in server refused (is Anonymous sign-in enabled in Firebase?). ") + ((r.json && r.json.error && r.json.error.message) || ""));
+    keep({ uid: r.json.localId, idToken: r.json.idToken, refreshToken: r.json.refreshToken, exp: Date.now() + (+r.json.expiresIn || 3600) * 1000 });
+  }
+  async function refresh() {
+    var r = await http("POST", TOKEN_URL + "/token?key=" + encodeURIComponent(CFG.apiKey), "grant_type=refresh_token&refresh_token=" + encodeURIComponent(auth.refreshToken), "form");
+    if (r.status !== 200 || !r.json || !r.json.id_token) throw fail(r.status || 500, "refresh");
+    keep({ ws: auth.ws, uid: r.json.user_id || auth.uid, idToken: r.json.id_token, refreshToken: r.json.refresh_token || auth.refreshToken, exp: Date.now() + (+r.json.expires_in || 3600) * 1000 });
+  }
+  var busy = null;
+  function token(force) {                                              // 쓸 수 있는 로그인 표를 돌려줌 (만료 5분 전이면 새로 받음)
+    if (busy) return busy;
+    if (auth && !force && Date.now() < auth.exp - 300000) return Promise.resolve(auth.idToken);
+    busy = (async function () {
+      if (!auth) await signUp();
+      else {
+        try { await refresh(); }
+        catch (e) {
+          if (e.status === 0) throw e;
+          if (auth.ws) { lost(); throw fail(401, tx("연결이 끊겼습니다. Workspace 에서 다시 연결하세요.", "The link is gone. Link again from Workspace.")); }   // 계정이 중지됐거나 연결이 지워짐 — 스스로는 못 고침
+          await signUp(); if (who && who.code) await enroll(who.name, who.code, who.admin).catch(function () {});   // 새 익명 계정 → 넣어 둔 코드로 다시 등록
+        }
+      }
+      return auth.idToken;
+    })();
+    return busy.then(function (v) { busy = null; return v; }, function (e) { busy = null; throw e; });
+  }
+  var viaPost = false;                                                 // 이 화면이 떠 있는 동안만 기억
+  async function send(method, url, body) {
+    if (method === "GET") return http("GET", url);
+    var alt = function () { return http("POST", url + "&x-http-method-override=" + method, body, "plain"); }, r;
+    if (viaPost) {
+      r = await alt();
+      if (r.status === 200 || r.status === 401 || r.status === 403) return r;
+      viaPost = false;                                                 // 이 방식이 통하지 않음 → 원래 방식으로
+    }
+    try { return await http(method, url, body); }
+    catch (e) { if (e.status !== 0) throw e; }
+    r = await alt(); viaPost = true; return r;                         // 여기까지 왔다면 인터넷은 되는데 PUT · PATCH 만 막힌 것
+  }
+  async function db(method, path, body, again) {
+    var r = await send(method, DB + ROOT + path + ".json?auth=" + encodeURIComponent(await token()), body);
+    if ((r.status === 401 || r.status === 403) && !again) {             // 로그인 표가 낡았을 수 있음 → 한 번만 새로 받아 다시. (규칙의 거절은 "Permission denied" 라고 옴)
+      var text = String((r.json && r.json.error) || "");
+      if (!/permission denied/i.test(text) || Date.now() - (auth.at || 0) > 1800000) { await token(true); return db(method, path, body, true); }
+    }
+    return r;
+  }
+  var denied = function (r) { return r.status === 401 || r.status === 403; };
+
+  /* ---------- 연결이 안 될 때: 어디서 막혔는지 ---------- */
+  var host = function (u) { try { return new URL(u).host; } catch (e) { return u; } };
+  async function reach(url) { try { await fetch(url, { cache: "no-store", mode: "no-cors" }); return true; } catch (e) { return false; } }   // 응답이 오기만 하면 닿는 것
+  async function why(e) {
+    var u = String((e && e.url) || "");
+    if (u.indexOf(AUTH_URL) === 0 || u.indexOf(TOKEN_URL) === 0) return tx("로그인 서버(" + host(u) + ")에 연결되지 않습니다. 인터넷 연결이나 차단 여부를 확인하세요.", "Cannot reach the sign-in server (" + host(u) + "). Check the connection or whether it is blocked.");
+    if (await reach(DB + "/.json?shallow=true")) return tx("저장소에서 읽기는 되는데 보내기(쓰기)가 막혀 있습니다. 이 네트워크가 올리기를 막는 것으로 보입니다.", "Reading from the database works but sending (writing) is blocked. This network seems to block uploads.");
+    return tx("저장소(" + host(DB) + ")에 연결되지 않습니다. 인터넷 연결이나 차단 여부를 확인하세요.", "Cannot reach the database (" + host(DB) + "). Check the connection or whether it is blocked.");
+  }
+
+  /* ---------- 접속 코드로 등록 ---------- */
+  async function enroll(name, code, admin) {
+    var body = { name: name, code: code, at: Date.now() };
+    if (admin) body.admin = admin;
+    var r = await send("PUT", DB + ROOT + "/members/" + auth.uid + ".json?auth=" + encodeURIComponent(auth.idToken), body);
+    if (r.status === 200) return true;
+    if (denied(r)) return false;
+    throw fail(r.status || 0, tx("저장소에 연결할 수 없습니다.", "Cannot reach the database."));
+  }
+  async function member() { var r = await db("GET", "/r"); if (r.status === 200) return true; if (denied(r)) return false; throw fail(r.status || 0, tx("저장소에 연결할 수 없습니다.", "Cannot reach the database.")); }
+  function meOut() {
+    if (who && who.ws) return { ws: true, id: who.id, name: who.name || "", admin: who.lv === "a", write: who.lv !== "v", project: who.pj || "", team: who.tm || "", until: who.until };
+    var n = (who && who.name) || ""; return { ws: false, id: "n:" + n.toLowerCase().replace(/\s+/g, ""), name: n, admin: !!(who && who.admin), write: true, project: "", team: "" };
+  }   // 같은 사람인지는 이름으로: 띄어쓰기 · 영문 대소문자는 무시
+
+  /* ---------- 저장 (LW.store 와 같은 모양) ---------- */
+  var K = function (key) { return String(key).replace(/[.$#\[\]\/]/g, "_"); };
+  var seen = {}, watchers = {}, pollTimer = null, stopped = false, lastAct = Date.now(), lastPoll = 0;
+  function gap() {                                                     // 다음 확인까지: 쓰는 중 5초 → 2분 쉬면 30초 → 10분 쉬면 2분 → 화면이 가려지면 5분
+    if (document.hidden) return 300000;                                // (작은 요청도 암호화 · 헤더만큼 내려받기 사용량이 들기 때문에, 보는 사람이 없을 때는 드물게)
+    var idle = Date.now() - lastAct, g = idle < 120000 ? POLL : idle < 600000 ? 30000 : 120000;
+    return /^#door/.test(location.hash) ? Math.min(g, 60000) : g;      // 문 앞 표시 화면은 아무도 만지지 않으므로 1분을 넘기지 않음
+  }
+  function touch() {
+    var idle = Date.now() - lastAct; lastAct = Date.now();
+    if (idle > 15000 && pollTimer && !stopped) { clearTimeout(pollTimer); pollTimer = setTimeout(poll, Date.now() - lastPoll > 4000 ? 60 : POLL); }   // 쉬다가 다시 만짐: 바로 확인 (방금 확인했으면 5초 뒤) — 길게 잡아 둔 다음 차례를 당김
+  }
+  ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"].forEach(function (t) { document.addEventListener(t, touch, { passive: true, capture: true }); });
+  window.addEventListener("focus", touch);
+  function lost() { if (stopped) return; stopped = true; clearTimeout(pollTimer); if (api.onDenied) api.onDenied(); }
+  async function readDoc(key) {
+    var r = await db("GET", "/d/" + K(key));
+    if (denied(r)) { lost(); throw fail(403, tx("접속 코드를 다시 넣어야 합니다.", "Enter the access code again.")); }
+    if (r.status !== 200) throw fail(r.status || 0);
+    var d = r.json, v = null;
+    if (d && typeof d.v === "string") { try { v = JSON.parse(d.v); } catch (e) { v = null; } }
+    return { r: d ? (+d.r || 0) : 0, v: v };
+  }
+  async function writeDoc(key, rev, value) {
+    var k = K(key), body = {};
+    body["d/" + k] = { r: rev + 1, v: JSON.stringify(value === undefined ? null : value) };
+    body["r/" + k] = rev + 1;
+    var r = await db("PATCH", "", body);
+    if (r.status === 200) { seen[k] = rev + 1; return rev + 1; }
+    if (denied(r)) {                                                   // 규칙이 거절: 다른 사람이 먼저 썼거나(판 번호가 바뀜), 권한이 없거나
+      var cur = await readDoc(key);
+      if (cur.r !== rev) throw fail(409, "conflict");
+      throw fail(403, tx("저장할 권한이 없습니다 (회의실 설정은 관리자 코드가 필요합니다).", "No permission to save (room settings need the admin code)."));
+    }
+    throw fail(r.status || 0);
+  }
+  var wait = function () { return new Promise(function (res) { setTimeout(res, 150 + Math.random() * 350); }); };
+  var store = {
+    get: async function (key, fallback) { var d = await readDoc(key); return d.v === null || d.v === undefined ? fallback : d.v; },
+    set: async function (key, value) {
+      for (var i = 0; i < 6; i++) {
+        var d = await readDoc(key);
+        try { return await writeDoc(key, d.r, value); } catch (e) { if (e.status !== 409) throw e; await wait(); }
+      }
+      throw fail(409, tx("여러 사람이 동시에 저장하고 있습니다. 잠시 후 다시 시도하세요.", "Several people are saving at once. Try again shortly."));
+    },
+    update: async function (key, fn, fallback) {
+      for (var i = 0; i < 6; i++) {
+        var d = await readDoc(key), base = d.v === null || d.v === undefined ? fallback : d.v;
+        var next = await fn(JSON.parse(JSON.stringify(base === undefined ? null : base)));
+        try { await writeDoc(key, d.r, next); return next; } catch (e) { if (e.status !== 409) throw e; await wait(); }
+      }
+      throw fail(409, tx("여러 사람이 동시에 저장하고 있습니다. 잠시 후 다시 시도하세요.", "Several people are saving at once. Try again shortly."));
+    },
+    watch: function (key, cb) {
+      var k = K(key), w = { cb: cb, on: true };
+      (watchers[k] = watchers[k] || { key: key, list: [] }).list.push(w);
+      readDoc(key).then(function (d) { seen[k] = d.r; if (w.on) cb(d.v, { rev: d.r }); }, function () { /* 다음 확인 때 다시 */ delete seen[k]; });
+      if (!pollTimer && !stopped) pollTimer = setTimeout(poll, POLL);
+      return function () { w.on = false; watchers[k].list = watchers[k].list.filter(function (x) { return x !== w; }); };
+    },
+  };
+  async function poll() {                                              // 판 번호 표만 받아 보고, 바뀐 문서만 다시 받음
+    pollTimer = null;
+    if (stopped) return;
+    lastPoll = Date.now();
+    try {
+      var r = await db("GET", "/r");
+      if (denied(r)) return lost();
+      if (r.status === 200) {
+        var revs = r.json || {}, keys = Object.keys(watchers).filter(function (k) { return watchers[k].list.length && (+revs[k] || 0) !== (seen[k] === undefined ? -1 : seen[k]); });
+        for (var i = 0; i < keys.length; i++) {
+          var k = keys[i], d = await readDoc(watchers[k].key);
+          seen[k] = +revs[k] || 0;
+          watchers[k].list.slice().forEach(function (w) { if (w.on) { try { w.cb(d.v, { rev: d.r }); } catch (e) { console.error(e); } } });
+        }
+      }
+    } catch (e) { /* 끊겼으면 다음 차례에 다시 */ }
+    if (!stopped) pollTimer = setTimeout(poll, gap());
+  }
+  document.addEventListener("visibilitychange", function () { if (!document.hidden && !stopped && Object.keys(watchers).length) { lastAct = Date.now(); clearTimeout(pollTimer); pollTimer = setTimeout(poll, 200); } });   // 탭으로 돌아옴 = 보러 온 것
+
+  /* ---------- 화면: 이름 · 접속 코드 / 관리자 코드 / 처음 설정 ---------- */
+  function box(html) {                                                 // 화면의 다른 창과 같은 <dialog> — 뒤쪽은 눌리지 않고, 열려 있던 예약 창보다 위에 뜸
+    var o = document.createElement("dialog"); o.id = "xOver";
+    o.setAttribute("aria-labelledby", "xTitle");
+    o.setAttribute("style", "border-radius:14px;padding:22px 22px 18px;box-shadow:0 18px 50px rgba(0,0,0,.25);font:15px/1.6 var(--font-body,sans-serif);overflow:auto");
+    o.innerHTML = html;
+    document.body.appendChild(o);
+    o.addEventListener("cancel", function (ev) { ev.preventDefault(); var c = o.querySelector("#xCancel"); if (c) c.click(); });   // Esc = [닫기] (닫기가 없는 창은 닫히지 않음)
+    if (o.showModal) o.showModal(); else o.setAttribute("open", "");
+    return o;
+  }
+  var FIELD = 'style="display:block;width:100%;margin:4px 0 12px;padding:10px 12px;font:inherit;font-size:16px;border:1px solid var(--line-strong,#bbb);border-radius:8px;background:var(--sheet,#fff);color:inherit"';
+  var BTN = 'style="font:inherit;font-weight:700;padding:10px 18px;border-radius:8px;border:1px solid var(--accent-strong,#c2461f);background:var(--accent-strong,#c2461f);color:var(--accent-ink,#fff);cursor:pointer"';
+  var BTN2 = 'style="font:inherit;padding:10px 18px;border-radius:8px;border:1px solid var(--line-strong,#bbb);background:transparent;color:inherit;cursor:pointer"';
+  var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]; }); };
+  function join(first, note) {                                         // 이름 + 접속 코드. 끝나면 resolve
+    return new Promise(function (res) {
+      var o = box('<h2 id="xTitle" style="margin:0 0 4px;font-size:19px">' + tx("회의실 예약", "Meeting Rooms") + '</h2>' +
+        '<p style="margin:0 0 14px;color:var(--muted,#666);font-size:13.5px">' + esc(note || tx("이름과 접속 코드를 한 번만 넣으면 이 기기에서는 다시 묻지 않습니다.", "Enter your name and the access code once; this device will not ask again.")) + "</p>" +
+        '<form id="xForm"><label for="xName">' + tx("이름", "Name") + '</label><input id="xName" autocomplete="name" maxlength="40" required ' + FIELD + ' value="' + esc((who && who.name) || "") + '">' +
+        '<label for="xCode">' + tx("접속 코드", "Access code") + '</label><input id="xCode" type="password" autocomplete="off" maxlength="80" required ' + FIELD + ' value="' + esc((who && who.code) || "") + '">' +
+        '<p id="xMsg" role="alert" style="min-height:1.4em;margin:0 0 10px;color:var(--busy,#b8371a);font-size:13.5px"></p>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end">' + (first ? "" : '<span style="margin-right:auto"><button type="button" id="xForget" ' + BTN2 + ">" + tx("이 기기에서 지우기", "Forget on this device") + '</button></span><button type="button" id="xCancel" ' + BTN2 + ">" + tx("닫기", "Close") + "</button>") + '<button id="xGo" ' + BTN + ">" + tx("들어가기", "Enter") + "</button></div></form>" +
+        '<p style="margin:14px 0 0;color:var(--muted,#666);font-size:12.5px">' + tx("이름이 같으면 같은 사람으로 봅니다 (PC 와 폰에서 같은 이름을 쓰세요).", "The same name counts as the same person (use one name on PC and phone).") + ' <span id="xVer" style="white-space:nowrap">· v' + VER + "</span></p>");
+      var f = o.querySelector("#xForm"), msg = o.querySelector("#xMsg"), go = o.querySelector("#xGo");
+      o.querySelector(who && who.name ? "#xCode" : "#xName").focus();   // 바로 (잠깐 뒤에 옮기면 그 사이에 치기 시작한 글자 · 자동 채우기가 다른 칸으로 감)
+      if (!first) {
+        o.querySelector("#xCancel").onclick = function () { o.remove(); res(false); };
+        o.querySelector("#xForget").onclick = function () { save("mrx.me", null); save("mrx.auth", null); location.reload(); };   // 같이 쓰는 PC 에서: 이름 · 코드 · 로그인 표를 지우고 처음 화면으로
+      }
+      f.onsubmit = async function (ev) {
+        ev.preventDefault();
+        var name = o.querySelector("#xName").value.trim(), code = o.querySelector("#xCode").value.trim();
+        if (!name || !code) { msg.textContent = tx("이름과 접속 코드를 모두 넣으세요.", "Enter both your name and the access code."); o.querySelector(name ? "#xCode" : "#xName").focus(); return; }
+        go.disabled = true; msg.textContent = tx("확인하는 중…", "Checking…");
+        try {
+          await token();
+          var adm = who && who.code === code ? (who.admin || "") : "", ok = adm ? await enroll(name, code, adm) : false;
+          if (!ok) { adm = ""; ok = await enroll(name, code, ""); }
+          if (!ok) { msg.textContent = tx("접속 코드가 맞지 않습니다.", "The access code is not correct."); go.disabled = false; return; }
+          who = { name: name, code: code, admin: adm }; save("mrx.me", who);
+          o.remove(); res(true);
+        } catch (e) { msg.textContent = e.status === 0 ? await why(e) : (e.message || String(e)); go.disabled = false; }
+      };
+    });
+  }
+  function adminAsk() {
+    var o = box('<h2 id="xTitle" style="margin:0 0 4px;font-size:19px">' + tx("관리자 코드", "Admin code") + '</h2><p style="margin:0 0 14px;color:var(--muted,#666);font-size:13.5px">' +
+      tx("회의실 설정을 바꾸고 다른 사람의 예약을 고칠 수 있게 됩니다.", "Lets you change room settings and edit other people's bookings.") + '</p><form id="xForm"><label for="xCode">' + tx("관리자 코드", "Admin code") +
+      '</label><input id="xCode" type="password" autocomplete="off" maxlength="80" required ' + FIELD + '><p id="xMsg" role="alert" style="min-height:1.4em;margin:0 0 10px;color:var(--busy,#b8371a);font-size:13.5px"></p>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end">' + (who && who.admin ? '<button type="button" id="xOff" ' + BTN2 + ">" + tx("관리자 끄기", "Turn admin off") + "</button>" : "") + '<button type="button" id="xCancel" ' + BTN2 + ">" + tx("닫기", "Close") + '</button><button id="xGo" ' + BTN + ">" + tx("확인", "OK") + "</button></div></form>");
+    var msg = o.querySelector("#xMsg"), go = o.querySelector("#xGo");
+    o.querySelector("#xCode").focus();
+    o.querySelector("#xCancel").onclick = function () { o.remove(); };
+    var done = function (a) { who.admin = a; save("mrx.me", who); o.remove(); if (api.onUpdate) api.onUpdate(meOut()); };
+    if (o.querySelector("#xOff")) o.querySelector("#xOff").onclick = async function () { try { await token(); await enroll(who.name, who.code, ""); } catch (e) { /* 이 기기에서만 끔 */ } done(""); };
+    o.querySelector("#xForm").onsubmit = async function (ev) {
+      ev.preventDefault();
+      var code = o.querySelector("#xCode").value.trim(); if (!code) return;
+      go.disabled = true; msg.textContent = tx("확인하는 중…", "Checking…");
+      try { await token(); if (await enroll(who.name, who.code, code)) return done(code); msg.textContent = tx("관리자 코드가 맞지 않습니다.", "The admin code is not correct."); }
+      catch (e) { msg.textContent = e.message || String(e); }
+      go.disabled = false;
+    };
+  }
+  function tokenIn(text) {                                             // 주소(#t=…)나 표 자체에서 연결 표를 꺼냄
+    var m = /[#&]t=([A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+)/.exec(String(text)) || /^\s*([A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+)\s*$/.exec(String(text));
+    return m ? m[1] : "";
+  }
+  function needLink(note) {                                            // Workspace 계정으로 연결하라는 안내. 주소를 붙여 넣어 연결하면 "linked", 접속 코드를 고르면 "code"
+    return new Promise(function (res) {
+      var o = box('<h2 id="xTitle" style="margin:0 0 6px;font-size:19px">' + tx("회의실 예약", "Meeting Rooms") + "</h2>" +
+        '<p id="xNote" style="margin:0 0 10px;color:var(--busy,#b8371a);font-size:13.5px">' + esc(note || "") + "</p>" +
+        '<p style="margin:0 0 6px"><b>' + tx("Workspace 계정으로 연결해야 합니다.", "Link with your Workspace account.") + "</b></p>" +
+        '<ul style="margin:0 0 12px;padding-left:20px;font-size:14px"><li>' + tx("회사 PC: Workspace 의 [회의실 예약 (인터넷)] → [회의실 예약 열기]", "Office PC: Workspace → Meeting Rooms (internet) → Open meeting rooms") +
+        "</li><li>" + tx("폰: 그 화면의 [QR 보이기]를 누르고 카메라로 찍기", "Phone: press Show QR code there and scan it with the camera") + "</li></ul>" +
+        '<form id="xForm"><label for="xLink" style="font-size:13.5px">' + tx("또는 복사한 연결 주소 붙여넣기", "Or paste a copied link") + "</label>" +
+        '<input id="xLink" autocomplete="off" spellcheck="false" ' + FIELD + ">" +
+        '<p id="xMsg" role="alert" style="min-height:1.4em;margin:0 0 10px;color:var(--busy,#b8371a);font-size:13.5px"></p>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end">' +
+        (LOGIN === "both" ? '<span style="margin-right:auto"><button type="button" id="xUseCode" ' + BTN2 + ">" + tx("접속 코드로 들어가기", "Use the access code") + "</button></span>" : "") +
+        '<button id="xGo" ' + BTN + ">" + tx("연결", "Link") + "</button></div></form>" +
+        '<p style="margin:12px 0 0;font-size:12.5px;color:var(--muted,#666)"><span id="xVer">v' + VER + "</span></p>");
+      var msg = o.querySelector("#xMsg"), go = o.querySelector("#xGo");
+      if (LOGIN === "both") o.querySelector("#xUseCode").onclick = function () { o.remove(); res("code"); };
+      o.querySelector("#xForm").onsubmit = async function (ev) {
+        ev.preventDefault();
+        var t = tokenIn(o.querySelector("#xLink").value);
+        if (!t) { msg.textContent = tx("연결 주소가 아닙니다. Workspace 화면의 [연결 주소 복사]로 복사한 것을 붙여 넣으세요.", "That is not a link. Paste what Copy link gave you in Workspace."); return; }
+        go.disabled = true; msg.textContent = "";
+        try { await link(t); o.remove(); res("linked"); }
+        catch (e) { msg.textContent = e.status === 0 ? await why(e) : (e.message || String(e)); go.disabled = false; }
+      };
+    });
+  }
+  function wsInfo() {                                                  // 내 연결: 누구로, 언제까지. 이 기기의 연결을 끊을 수 있음
+    var d = new Date(who.until || 0), p = function (n) { return (n < 10 ? "0" : "") + n; }, lv = { a: tx("관리자", "admin"), u: tx("예약 가능", "can book"), v: tx("보기만", "view only") }[who.lv] || "";
+    var o = box('<h2 id="xTitle" style="margin:0 0 10px;font-size:19px">' + tx("내 연결", "My link") + "</h2>" +
+      '<p style="margin:0 0 4px"><b id="xWsName">' + esc(who.name) + "</b> · " + esc(lv) + "</p>" +
+      '<p id="xWsUntil" style="margin:0 0 12px;font-size:14px">' + tx("Workspace 계정으로 연결됨 · 기한 ", "Linked with a Workspace account · until ") + d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "</p>" +
+      '<p style="margin:0 0 14px;font-size:13.5px;color:var(--muted,#666)">' + tx("이름 · 등급이 바뀌었거나 기한을 늘리려면 Workspace 에서 다시 여세요.", "To update your name or level, or to extend the period, open it from Workspace again.") + ' <span id="xVer" style="white-space:nowrap">· v' + VER + "</span></p>" +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><span style="margin-right:auto"><button type="button" id="xForget" ' + BTN2 + ">" + tx("이 기기의 연결 끊기", "Unlink this device") + '</button></span><button type="button" id="xCancel" ' + BTN + ">" + tx("닫기", "Close") + "</button></div>");
+    o.querySelector("#xCancel").onclick = function () { o.remove(); };
+    o.querySelector("#xForget").onclick = function () { save("mrx.me", null); save("mrx.auth", null); location.reload(); };
+    o.querySelector("#xCancel").focus();
+  }
+  function setup() {                                                   // config.js 가 아직 없을 때: 설정 파일을 만들어 주는 화면
+    var o = box('<h2 id="xTitle" style="margin:0 0 6px;font-size:19px">처음 설정 · First setup</h2>' +
+      '<p style="margin:0 0 10px;font-size:13.5px">이 화면은 아직 저장소(Firebase)와 연결되지 않았습니다. 아래에서 설정 파일 두 개를 만들어 <b>Setup_Guide.html</b>(설치 안내)의 순서대로 쓰세요. <span id="xVer" style="color:var(--muted,#666)">v' + VER + '</span></p>' +
+      '<label for="xCfg"><b>① Firebase 설정 붙여넣기</b> <span style="color:var(--muted,#666);font-size:12.5px">(콘솔 → 프로젝트 설정 → 내 앱 → firebaseConfig)</span></label>' +
+      '<textarea id="xCfg" rows="6" spellcheck="false" ' + FIELD + ' placeholder="const firebaseConfig = { apiKey: &quot;…&quot;, databaseURL: &quot;https://…firebaseio.com&quot;, … };"></textarea>' +
+      '<label style="display:flex;gap:8px;align-items:flex-start;margin:0 0 10px;font-size:14px"><input type="checkbox" id="xCodeOn" style="margin-top:4px"><span>접속 코드로도 들어오게 함 <span style="color:var(--muted,#666)">(끄면 Workspace 계정으로만 들어옵니다 — 기본. Workspace 계정이 없는 사람도 써야 할 때만 켜세요)</span></span></label>' +
+      '<button type="button" id="xMk1" ' + BTN + '>config.js 내려받기</button><p id="xMsg1" role="status" style="min-height:1.4em;margin:6px 0 14px;font-size:13.5px"></p>' +
+      '<label for="xC1"><b>② 코드 정하기 — 접속 코드를 켰을 때만</b> <span style="color:var(--muted,#666);font-size:12.5px">(각각 8자 이상 · 10자 이상 권장, 서로 다르게)</span></label>' +
+      '<input id="xC1" maxlength="80" placeholder="접속 코드 (모든 사람)" ' + FIELD + '><input id="xC2" maxlength="80" placeholder="관리자 코드 (회의실 설정을 바꿀 사람)" ' + FIELD + ">" +
+      '<button type="button" id="xMk2" ' + BTN + '>first-data.json 내려받기</button><p id="xMsg2" role="status" style="min-height:1.4em;margin:6px 0 0;font-size:13.5px"></p>');
+    var dl = function (name, text, type) { var a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: type })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000); };
+    o.querySelector("#xMk1").onclick = function () {
+      var s = o.querySelector("#xCfg").value, m1 = s.match(/apiKey["']?\s*[:=]\s*["']([^"']+)["']/), m2 = s.match(/databaseURL["']?\s*[:=]\s*["'](https:\/\/[^"']+)["']/), msg = o.querySelector("#xMsg1");
+      if (!m1 || !m2) { msg.style.color = "var(--busy,#b8371a)"; msg.textContent = !m1 ? "apiKey 를 찾지 못했습니다. firebaseConfig 전체를 붙여넣으세요." : "databaseURL 이 없습니다. Realtime Database 를 먼저 만든 뒤 설정을 다시 복사하세요."; return; }
+      dl("config.js", "/* 회의실 예약 — Firebase 연결 설정. index.html 과 같은 폴더에 둡니다. */\nwindow.MR_CONFIG = " + JSON.stringify({ apiKey: m1[1], databaseURL: m2[1].replace(/\/+$/, ""), login: o.querySelector("#xCodeOn").checked ? "both" : "ws" }, null, 2) + ";\n", "text/javascript");
+      msg.style.color = /\.firebaseio\.com$/.test(m2[1].replace(/\/+$/, "")) ? "var(--free,#2e7d5b)" : "var(--busy,#b8371a)";
+      msg.textContent = /\.firebaseio\.com$/.test(m2[1].replace(/\/+$/, "")) ? "config.js 를 내려받았습니다. index.html 옆에 올리세요." : "내려받았습니다. 다만 저장소 주소가 firebaseio.com 이 아닙니다 — 사내 PC 에서 열리는지 확인된 것은 firebaseio.com(미국 리전)뿐입니다.";
+    };
+    var codeOn = function () { var on = o.querySelector("#xCodeOn").checked; ["#xC1", "#xC2", "#xMk2"].forEach(function (q) { o.querySelector(q).disabled = !on; }); };
+    o.querySelector("#xCodeOn").onchange = codeOn; codeOn();
+    o.querySelector("#xMk2").onclick = function () {
+      var a = o.querySelector("#xC1").value.trim(), b = o.querySelector("#xC2").value.trim(), msg = o.querySelector("#xMsg2");
+      if (a.length < 8 || b.length < 8 || a === b) { msg.style.color = "var(--busy,#b8371a)"; msg.textContent = "두 코드를 8자 이상으로, 서로 다르게 넣으세요."; return; }
+      dl("first-data.json", JSON.stringify({ mr: { secret: { code: a, admin: b } } }, null, 2) + "\n", "application/json");
+      msg.style.color = "var(--free,#2e7d5b)"; msg.textContent = "first-data.json 을 내려받았습니다. Firebase 콘솔의 Realtime Database → ⋮ → JSON 가져오기로 넣으세요. 이 파일은 GitHub 에 올리지 마세요.";
+    };
+  }
+
+  /* ---------- 시작 ---------- */
+  api.store = store;
+  api.me = meOut;
+  api.ready = async function () {
+    if (!CFG || !CFG.apiKey || !DB) { setup(); return new Promise(function () {}); }
+    var note = "";
+    if (T0) { var t = T0; T0 = ""; try { await link(t); } catch (e) { note = e.status === 0 ? await why(e) : (e.message || String(e)); } }   // Workspace 에서 넘어옴: 그 표로 로그인
+    for (;;) {
+      try {
+        if (who && who.ws && auth && auth.ws) {
+          if (await member()) break;
+          note = note || tx("연결 기간이 끝났습니다. Workspace 에서 다시 연결하세요.", "The link period has ended. Link again from Workspace.");
+        } else if (LOGIN !== "ws" && who && who.name && who.code) {
+          await token();
+          var ok = who.admin ? await enroll(who.name, who.code, who.admin) : false;      // 관리자 코드가 아직 맞는지도 여기서 확인됨 (규칙이 거절하면 관리자 표시를 뗌)
+          if (!ok) { if (who.admin) { who.admin = ""; save("mrx.me", who); } ok = await enroll(who.name, who.code, ""); }
+          if (ok && await member()) break;
+          note = tx("접속 코드가 바뀌었습니다. 새 코드를 넣어 주세요.", "The access code has changed. Enter the new one.");
+        }
+      } catch (e) { if (stopped) { stopped = false; note = note || e.message; } else note = note || e.message || String(e); }
+      var how = LOGIN === "code" ? "code" : await needLink(note);
+      if (how === "code") {
+        if (auth && auth.ws) { auth = null; save("mrx.auth", null); }                    // 계정 연결이 끝난 기기에서 접속 코드로: 새 익명 표로
+        await join(true, LOGIN === "code" ? note : "");
+        note = "";
+        if (await member().catch(function () { return false; })) break;
+      } else note = "";
+    }
+    return meOut();
+  };
+  api.change = async function () { if (who && who.ws) { wsInfo(); return; } if (await join(false)) { if (api.onUpdate) api.onUpdate(meOut()); } };
+  api.admin = adminAsk;
+  api.rejoin = async function () {
+    if ((who && who.ws) || LOGIN === "ws") {
+      var how = await needLink(tx("연결 기간이 끝났거나 연결이 끊겼습니다. Workspace 에서 다시 연결하세요.", "The link period has ended or the link is gone. Link again from Workspace."));
+      if (how === "code") { auth = null; save("mrx.auth", null); await join(true, ""); }
+    } else await join(true, tx("접속 코드가 바뀌었습니다. 새 코드를 넣어 주세요.", "The access code has changed. Enter the new one."));
+    location.reload();
+  };
+  return api;
+})();
+var LW = { store: EXT.store };       /* meeting-room-shim.js 가 찾는 이름 */
+
+</script>
+<script>
+/* Logicwon Workspace storage adapter for the meeting room tool.
+   The booking logic was written against a small document store (doc/collection/onSnapshot/acquire).
+   This adapter provides that same interface on top of LW.store (the Workspace server's per-tool storage):
+     config/main      -> key "config.main"
+     series/<id>      -> key "series"        (one map of all repeat rules)
+     days/<date>      -> key "days.<YYYY-MM>" (one map per month)
+     locks/main       -> key "lock"          (short lease, taken with optimistic concurrency) */
+var LWDB = (function () {
+  "use strict";
+  var listeners = {};          // key -> [fn(value)]
+  var cache = {};              // key -> last value
+  function notify(key, value) { cache[key] = value; (listeners[key] || []).slice().forEach(function (fn) { try { fn(value); } catch (e) { console.error(e); } }); }
+  function watchKey(key, fn) {
+    (listeners[key] = listeners[key] || []).push(fn);
+    var stop = LW.store.watch(key, function (v) { notify(key, v); }, 4000);
+    if (key in cache) setTimeout(function () { fn(cache[key]); }, 0);
+    return function () { stop(); listeners[key] = (listeners[key] || []).filter(function (f) { return f !== fn; }); };
+  }
+  function err(e) { var c = e && e.status === 403 ? "invalid_argument" : (e && e.status === 0 ? "unavailable" : "unknown"); return {code: c, message: e && e.message}; }
+  function snapDoc(id, data) { return {id: id, exists: data != null, data: function () { return data == null ? undefined : JSON.parse(JSON.stringify(data)); }, metadata: {fromCache: false}}; }
+  function snapDocs(map) {
+    var docs = Object.keys(map || {}).sort().map(function (id) { return snapDoc(id, map[id]); });
+    return {docs: docs, size: docs.length, empty: !docs.length, metadata: {fromCache: false}, docChanges: function () { return []; }};
+  }
+  function where(path) {             // -> {key, field} for a document path
+    var p = path.split("/");
+    if (p[0] === "config") return {key: "config." + p[1], field: null};
+    if (p[0] === "series") return {key: "series", field: p[1]};
+    if (p[0] === "days") return {key: "days." + p[1].slice(0, 7), field: p[1]};
+    if (p[0] === "locks") return {key: "lock", field: null};
+    throw new Error("unknown path " + path);
+  }
+  function doc(path) {
+    var w = where(path), id = path.split("/").pop();
+    return {
+      id: id, path: path,
+      get: async function () {
+        try { var v = await LW.store.get(w.key, null); cache[w.key] = v; return snapDoc(id, w.field ? (v || {})[w.field] : v); }
+        catch (e) { throw err(e); }
+      },
+      set: async function (data) {
+        try {
+          var v = w.field
+            ? await LW.store.update(w.key, function (m) { m = m || {}; m[w.field] = data; return m; }, {})
+            : (await LW.store.set(w.key, data), data);
+          notify(w.key, v);
+        } catch (e) { throw err(e); }
+      },
+      update: async function (data) { var s = await this.get(); var cur = s.exists ? s.data() : {}; Object.keys(data).forEach(function (k) { cur[k] = data[k]; }); return this.set(cur); },
+      delete: async function () {
+        try {
+          if (!w.field) { await LW.store.set(w.key, null); notify(w.key, null); return; }
+          var v = await LW.store.update(w.key, function (m) { m = m || {}; delete m[w.field]; return m; }, {});
+          notify(w.key, v);
+        } catch (e) { throw err(e); }
+      },
+      onSnapshot: function (next, onErr) {
+        return watchKey(w.key, function (v) { next(snapDoc(id, w.field ? (v || {})[w.field] : v)); });
+      },
+      /* lease: free if empty, expired, or already ours */
+      acquire: async function (o) {
+        var now = Date.now(), got = false;
+        try {
+          await LW.store.update(w.key, function (cur) {
+            if (cur && cur.holder !== o.holder && cur.until > now) { got = false; return cur; }
+            got = true; return {holder: o.holder, until: now + (o.ttlMs || 8000)};
+          }, null);
+        } catch (e) { throw err(e); }
+        return {acquired: got};
+      },
+      release: async function (holder) {
+        try { await LW.store.update(w.key, function (cur) { return cur && cur.holder === holder ? {holder: "", until: 0} : cur; }, null); } catch (e) { /* lease expires anyway */ }
+      },
+    };
+  }
+  function collection(name) {
+    function monthsOf(op, val) { return op === "in" ? val : [val]; }
+    function query(months) {
+      var keys = name === "days" ? months.map(function (m) { return "days." + m; }) : [name];
+      function merged() { var out = {}; keys.forEach(function (k) { var v = cache[k] || {}; Object.keys(v).forEach(function (id) { out[id] = v[id]; }); }); return out; }
+      return {
+        get: async function () {
+          try { for (var i = 0; i < keys.length; i++) cache[keys[i]] = await LW.store.get(keys[i], {}); }
+          catch (e) { throw err(e); }
+          return snapDocs(merged());
+        },
+        onSnapshot: function (next) {
+          var seen = {}, stops = keys.map(function (k) {
+            return watchKey(k, function () { seen[k] = 1; if (Object.keys(seen).length === keys.length) next(snapDocs(merged())); });
+          });
+          return function () { stops.forEach(function (s) { s(); }); };
+        },
+      };
+    }
+    var all = query([]);
+    return {
+      where: function (field, op, val) { return query(monthsOf(op, val)); },
+      get: all.get, onSnapshot: all.onSnapshot,
+      doc: function (id) { return doc(name + "/" + id); },
+    };
+  }
+  return {doc: doc, collection: collection};
+})();
+
+</script>
+<script>
+(function () {
+  "use strict";
+  var SLOT = 30;
+  /* Every visible string: [Korean, English]. */
+  var D = {
+    title: ["회의실 예약", "Meeting Rooms"], prev: ["이전", "Previous"], next: ["다음", "Next"], today: ["오늘", "Today"], pickDate: ["날짜 선택", "Pick a date"],
+    viewMode: ["보기 방식", "View"], vDay: ["일간", "Day"], vWeek: ["주간", "Week"], vMonth: ["월간", "Month"], statusAria: ["회의실 현황", "Room status"],
+    find: ["빈 회의실 찾기", "Find a free room"], mine: ["내 예약", "My bookings"], stats: ["이용 통계", "Usage stats"], settings: ["회의실 설정", "Room settings"],
+    moreMenu: ["더보기", "More"], optMore: ["추가 정보 (선택)", "More options (optional)"], nPeople: ["{0}명", "{0} people"],
+    gridAria: ["예약 시간표. 방향키로 칸을 옮기고 Enter 로 고릅니다.", "Booking sheet. Use the arrow keys to move between slots and Enter to select."],
+    kbdHint: [" 키보드는 Tab 으로 시간표에 들어가 방향키로 칸을 옮깁니다.", " With a keyboard, Tab into the sheet and use the arrow keys to move between slots."],
+    close: ["닫기", "Close"], save: ["저장", "Save"], book: ["예약", "Book"], search: ["찾기", "Search"], edit: ["수정", "Edit"], all: ["전체", "All"],
+    slow: ["예약 현황을 아직 불러오지 못했습니다. 연결되면 자동으로 표시됩니다.", "Bookings have not loaded yet. They will appear once the connection is back."],
+    readOnly: ["보기 전용입니다. 예약하려면 관리자에게 문의하세요.", "View only. Ask the admin to book."],
+    dead: ["예약 현황과 연결이 끊겼습니다. 페이지를 다시 열어 주세요.", "Lost the connection to bookings. Please reopen the page."],
+    noHost: ["이 화면에서는 예약 현황에 연결할 수 없습니다.", "Bookings cannot be reached from this view."],
+    signIn: ["로그인해야 예약 현황을 볼 수 있습니다.", "Sign in to see bookings."],
+    hintMonth: ["날짜를 누르면 그날의 일간 예약표로 이동합니다.", "Select a date to open its day sheet."],
+    hintWeekAll: ["회의실마다 한 주의 예약을 한 줄로 봅니다. [+ 예약]을 누르면 그 회의실·그날의 가장 이른 빈 시간으로 예약 창이 열립니다. 날짜를 누르면 일간 예약표, 회의실 이름을 누르면 그 회의실의 주간 예약표로 이동합니다.", "One row per room for the week. Select [+ Book] to open the booking form at the earliest free time for that room and day. Select a date for its day sheet, or a room name for that room's week sheet."],
+    hintWeekAllRo: ["회의실마다 한 주의 예약을 한 줄로 봅니다. 날짜를 누르면 일간 예약표, 회의실 이름을 누르면 그 회의실의 주간 예약표로 이동합니다.", "One row per room for the week. Select a date for its day sheet, or a room name for that room's week sheet."],
+    roomCol: ["회의실", "Room"], wkFull: ["빈 시간 없음", "Fully booked"], wkRoomAria: ["{0} 주간 보기", "Week view for {0}"], wkBarAria: ["{0} {1} 예약된 시간 {2}", "{1}, {0}: booked {2}"],
+    hintGrid: ["빈 칸을 누르면 예약합니다. 내 예약을 누르면 수정, 30분 연장, 취소를 할 수 있습니다.", "Select an empty slot to book. Select your booking to edit, extend by 30 min, or cancel."],
+    noRooms: ["등록된 회의실이 없습니다.", "No rooms have been added yet."], loadingRooms: ["회의실 정보를 불러오는 중입니다.", "Loading rooms."], addFirst: ["회의실 등록", "Add rooms"],
+    inUse: ["사용 중", "In use"], blocked: ["사용 불가", "Unavailable"], free: ["비어 있음", "Free"], maint: ["점검", "Maintenance"],
+    untilWho: ["{0}까지 · {1}", "until {0} · {1}"], nextAt: ["다음 예약 {0}", "Next booking {0}"], noMoreToday: ["오늘 남은 예약 없음", "No more bookings today"],
+    nBookings: ["예약 {0}건", "{0} booking(s)"], hasBlock: ["사용 불가 시간 있음", "Has unavailable time"], none: ["예약 없음", "No bookings"],
+    firstAt: ["첫 일정 {0}", "First at {0}"], allDayFree: ["하루 종일 비어 있음", "Free all day"], openDoor: ["문 앞 화면 열기", "Open door display"],
+    cellBook: ["+ 예약", "+ Book"], cellAria: ["{0} {1} {2} 예약", "Book {1} at {2}, {0}"], repTag: ["반복", "Repeat"], plus30: ["+30분", "+30 min"],
+    more: ["+{0}건 더", "+{0} more"], cnt: ["예약 {0}건", "{0} bookings"], dayAria: ["{0} 일간 보기", "Day view for {0}"], seats: ["{0}명", "{0} seats"],
+    back: ["예약표로 돌아가기", "Back to schedule"], roomGone: ["이 회의실을 찾을 수 없습니다.", "This room was not found."],
+    useNow: ["지금 {0} 사용", "Use now for {0}"], under30: ["다음 예약까지 30분이 남지 않았습니다.", "Less than 30 min until the next booking."],
+    extend30: ["30분 연장", "Extend 30 min"], endNow: ["지금 종료", "End now"], walkIn: ["현장 예약", "Walk-in"],
+    justTaken: ["방금 다른 예약이 들어왔습니다.", "Someone just booked this time."], booked: ["{0} 예약했습니다.", "Booked {0}."],
+    extended: ["30분 연장했습니다.", "Extended by 30 min."], ended: ["회의를 종료하고 남은 시간을 반납했습니다.", "Meeting ended; the remaining time is free again."],
+    noToday: ["오늘 예약이 없습니다.", "No bookings today."], nextLine: ["다음 예약 {0} · {1}", "Next: {0} · {1}"],
+    hNew: ["예약하기", "New booking"], hEdit: ["예약 수정", "Edit booking"], hEditBlock: ["사용 불가 시간 수정", "Edit unavailable time"],
+    lRoom: ["회의실", "Room"], lDate: ["날짜", "Date"], lStart: ["시작", "Start"], lDur: ["사용 시간", "Duration"], durOpt: ["{0} ({1}까지)", "{0} (until {1})"],
+    lRep: ["반복", "Repeat"], repNone: ["반복 안 함", "Does not repeat"], lUntil: ["반복 종료일", "Repeat until"],
+    lName: ["예약자", "Booked by"], phName: ["이름", "Your name"], lN: ["참석 인원 (선택)", "Attendees (optional)"],
+    lProjectOpt: ["프로젝트 (선택)", "Project (optional)"], lTeamOpt: ["팀 (선택)", "Team (optional)"], lProject: ["프로젝트", "Project"], lTeam: ["팀", "Team"],
+    lTitle: ["회의명 (선택)", "Meeting title (optional)"], lReason: ["사유 (선택)", "Reason (optional)"], phTitle: ["예: 주간 공정 회의", "e.g. Weekly schedule review"],
+    blockChk: ["사용 불가 시간으로 막기 (점검·행사)", "Mark as unavailable (maintenance, events)"],
+    capWarn: ["{0} 정원은 {1}명입니다. 그대로 예약할 수는 있습니다.", "{0} seats {1}. You can still book it."],
+    detachNote: ["이 날 일정만 바뀌고, 반복 예약에서 분리됩니다.", "Only this day changes; it is detached from the repeating booking."],
+    saveBlock: ["사용 불가로 등록", "Mark unavailable"], skipSave: ["겹치는 날 빼고 등록", "Book without the conflicting days"],
+    eName: ["예약자 이름을 적어 주세요.", "Enter who is booking."], eRoomDate: ["회의실과 날짜를 골라 주세요.", "Choose a room and a date."],
+    ePast: ["이미 지난 시간입니다.", "That time has already passed."], eAhead: ["예약은 오늘부터 {0}일 뒤까지만 할 수 있습니다.", "You can book up to {0} days ahead."],
+    eMaxDur: ["한 번에 최대 {0}까지 예약할 수 있습니다.", "One booking can be at most {0}."],
+    eClash: ["그 시간에는 이미 다른 예약이 있습니다. 다른 시간을 골라 주세요.", "That time is already booked. Choose another time."],
+    eGone: ["이미 취소된 예약입니다.", "This booking was already cancelled."], eSeriesGone: ["이미 취소된 반복 예약입니다.", "This repeating booking was already cancelled."],
+    eUntil: ["반복 종료일을 예약일 이후로 골라 주세요.", "Choose an end date after the booking date."], eUntilMax: ["반복 종료일은 {0}까지만 고를 수 있습니다.", "The end date can be {0} at the latest."],
+    eNoDates: ["이 기간에는 해당하는 날이 없습니다.", "No matching days in this period."], eAllClash: ["고른 기간의 모든 날에 이미 예약이 있습니다.", "Every day in this period is already booked."],
+    eSome: ["{0}은 이미 예약이 있습니다. 그날만 빼고 등록할 수 있습니다.", "Already booked on {0}. You can book the other days."], andMore: [" 외 {0}일", " and {0} more"],
+    dEdit: ["예약을 수정했습니다.", "Booking updated."], dBooked: ["{0} {1} 예약했습니다.", "Booked {0}, {1}."], dBlocked: ["{0} {1} 사용 불가로 등록했습니다.", "Marked {0} unavailable, {1}."],
+    dSeries: ["{0} 반복 {1}회를 등록했습니다.", "Booked {1} occurrences ({0})."],
+    eNoConn: ["지금은 예약 현황에 연결할 수 없습니다.", "Bookings cannot be reached right now."], eBusy: ["다른 사람이 지금 예약 중입니다. 잠시 후 다시 시도하세요.", "Someone else is booking right now. Try again in a moment."],
+    eNoPerm: ["예약 권한이 없습니다. 관리자에게 문의하세요.", "You do not have permission to book. Ask the admin."],
+    eQuota: ["저장 공간이 가득 찼습니다. 관리자에게 알려 주세요.", "Storage is full. Tell the admin."], eSave: ["저장하지 못했습니다. 잠시 후 다시 시도하세요.", "Could not save. Try again in a moment."],
+    vDefault: ["회의실 예약", "Room booking"], byLine: ["예약자 {0}", "Booked by {0}"], regLine: ["등록 {0}", "Set by {0}"], attend: [" · 참석 {0}명", " · {0} attendees"],
+    repLine: ["{0} 반복 · {1}까지", "Repeats {0} · until {1}"], cancel: ["예약 취소", "Cancel booking"], cancelOne: ["이 날만 취소", "Cancel this day only"],
+    cancelAll: ["이 날부터 모두 취소", "Cancel this and following"], unblock: ["사용 불가 해제", "Remove block"], again: ["한 번 더 누르면 취소", "Press again to cancel"],
+    extTo: ["30분 연장 ({0}까지)", "Extend 30 min (until {0})"], canExt: ["뒤 30분이 비어 있어 연장할 수 있습니다.", "The next 30 min is free, so you can extend."],
+    extOnly: [" 연장은 이 날에만 적용됩니다.", " The extension applies to this day only."], adminBlock: ["관리자가 막아 둔 시간입니다.", "An admin marked this time unavailable."],
+    ownerOnly: ["예약한 사람과 관리자만 바꿀 수 있습니다.", "Only the person who booked it or an admin can change it."],
+    noExtEnd: ["운영 시간이 끝나서 연장할 수 없습니다.", "Cannot extend past opening hours."], noExtNext: ["바로 뒤에 다른 예약이 있어서 연장할 수 없습니다.", "Cannot extend: another booking follows."],
+    tooShort: ["남은 시간이 30분이 안 되어 그대로 둡니다.", "Less than 30 min remains, so nothing changes."], cancelled: ["취소했습니다.", "Cancelled."],
+    lEq: ["필요한 설비", "Equipment needed"], fOver: ["운영 시간({0})을 넘습니다. 시간을 줄여 주세요.", "That runs past closing time ({0}). Shorten it."],
+    fLoad: ["예약 현황을 불러오지 못했습니다.", "Could not load bookings."], fRes: ["{0} · 가능한 회의실 {1}곳", "{0} · {1} room(s) available"],
+    fNone: ["{0} · 조건에 맞는 빈 회의실이 없습니다.", "{0} · no free room matches."], capLine: ["정원 {0}명", "Seats {0}"],
+    mLoading: ["불러오는 중입니다.", "Loading."], mNoId: ["로그인 정보를 확인할 수 없어 내 예약을 찾을 수 없습니다.", "Cannot tell who you are, so your bookings cannot be listed."],
+    mFail: ["예약을 불러오지 못했습니다. 잠시 후 다시 열어 주세요.", "Could not load bookings. Open this again in a moment."],
+    mSome: ["앞으로 6개월 예약입니다. 누르면 그 예약으로 이동합니다.", "Your bookings for the next 6 months. Select one to open it."], mNone: ["앞으로 잡힌 예약이 없습니다.", "You have no upcoming bookings."],
+    mRep: [" · 반복", " · repeating"], mRepLine: ["{0} · {1} · {2}까지 · 다음 {3}", "{0} · {1} · until {2} · next {3}"],
+    stHead: ["이용 통계 · {0}", "Usage stats · {0}"], sRoom: ["회의실별", "By room"], sProject: ["프로젝트별", "By project"], sTeam: ["팀별", "By team"], sUser: ["사용자별", "By user"], sHour: ["시간대별", "By hour"],
+    stBase: ["평일 {0}일, 운영 시간 {1} 기준입니다. 앞으로 잡힌 예약도 포함하고, 사용 불가 시간은 뺐습니다.", "Based on {0} weekdays and opening hours {1}. Includes future bookings; excludes unavailable time."],
+    stOcc: ["막대는 가동률(예약된 시간 ÷ 운영 시간)입니다.", "Bars show occupancy (booked time ÷ open time)."], stShare: ["막대는 전체 예약 시간 중 차지하는 비율입니다.", "Bars show the share of all booked time."],
+    stEmpty: ["이 달에는 예약이 없습니다.", "No bookings this month."], unspecified: ["미지정", "Unspecified"],
+    statRoom: ["{0}% · {1}시간 · {2}건", "{0}% · {1} h · {2} bookings"], statGroup: ["{0}% · {1}시간 · {2}건", "{0}% · {1} h · {2} bookings"],
+    lRooms: ["회의실 이름, 정원, 설비", "Room name, seats, equipment"], phRoom: ["회의실 이름", "Room name"], phCap: ["정원", "Seats"], del: ["삭제", "Remove"], addRoom: ["회의실 추가", "Add a room"],
+    lOpen: ["운영 시작", "Opens"], lClose: ["운영 종료", "Closes"], lMaxDur: ["한 번에 최대 사용 시간", "Longest single booking"], lAhead: ["며칠 뒤까지 예약 가능", "How far ahead to allow"],
+    noLimit: ["제한 없음", "No limit"], nDays: ["{0}일", "{0} days"], ruleNote: ["예약 규칙은 편집 권한이 있는 관리자에게는 적용되지 않습니다.", "Booking rules do not apply to admins with edit access."],
+    lProjects: ["프로젝트 목록 (쉼표로 구분)", "Projects (comma-separated)"], lTeams: ["팀 목록 (쉼표로 구분)", "Teams (comma-separated)"],
+    eNeedRoom: ["회의실을 하나 이상 적어 주세요.", "Enter at least one room."], eEndAfter: ["종료 시각은 시작 시각보다 늦어야 합니다.", "Closing time must be after opening time."], setSaved: ["설정을 저장했습니다.", "Settings saved."]
+  };
+  var WDS = [["일", "월", "화", "수", "목", "금", "토"], ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]];
+  var NTH = [["첫째", "둘째", "셋째", "넷째", "다섯째"], ["1st", "2nd", "3rd", "4th", "5th"]];
+  var MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var MONF = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  var EQ = { proj: ["빔프로젝터", "Projector"], tv: ["모니터", "Display"], vc: ["화상회의", "Video conferencing"], wb: ["화이트보드", "Whiteboard"], phone: ["전화", "Phone"] };
+
+  var S = {
+    lang: "ko", date: null, view: "day", room: "", door: null, cfg: null, cfgLoaded: false, days: {}, series: {}, rangeLoaded: false,
+    db: null, myId: null, myName: "", names: {}, canWrite: true, canEdit: false, isOwner: false, readOnly: false, slow: false, dead: null,
+    myProject: "", myTeam: ""          /* 포털 프로필의 프로젝트 · 팀 (있으면 예약 창의 첫 값) */
+  };
+  function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+  if (store("roomBookLang") === "en") S.lang = "en";
+  var v0 = store("roomBookView"); if (v0 === "week" || v0 === "month") S.view = v0;
+
+  var en = function () { return S.lang === "en"; };
+  var li = function () { return en() ? 1 : 0; };
+  function t(k) {
+    var a = arguments, s = D[k] ? D[k][li()] : k;
+    return s.replace(/\{(\d)\}/g, function (_, i) { return a[+i + 1] != null ? a[+i + 1] : ""; });
+  }
+  var $ = function (id) { return document.getElementById(id); };
+  var el = function (tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  var pad = function (n) { return (n < 10 ? "0" : "") + n; };
+  var fmt = function (m) { return pad(Math.floor(m / 60)) + ":" + pad(m % 60); };
+  var span = function (b) { return fmt(b.start) + "–" + fmt(b.end); };
+  var durText = function (m) {
+    var h = Math.floor(m / 60), r = m % 60;
+    return en() ? [h ? h + " h" : "", r ? r + " min" : ""].filter(Boolean).join(" ") : [h ? h + "시간" : "", r ? r + "분" : ""].filter(Boolean).join(" ");
+  };
+  var dateKey = function (d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); };
+  var parseKey = function (k) { var p = k.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); };
+  var addDays = function (k, n) { var d = parseKey(k); d.setDate(d.getDate() + n); return dateKey(d); };
+  var utc = function (k) { var p = k.split("-"); return Date.UTC(+p[0], +p[1] - 1, +p[2]); };
+  var diffDays = function (a, b) { return Math.round((utc(b) - utc(a)) / 864e5); };
+  var dow = function (k) { return parseKey(k).getDay(); };
+  var wd = function (k) { return WDS[li()][dow(k)]; };
+  var weekStart = function (k) { return addDays(k, -((dow(k) + 6) % 7)); };
+  var md = function (k) { var p = k.split("-"); return en() ? MON[+p[1] - 1] + " " + (+p[2]) : (+p[1]) + "월 " + (+p[2]) + "일"; };
+  var mdw = function (k) { return en() ? wd(k) + ", " + md(k) : md(k) + " (" + wd(k) + ")"; };
+  var ym = function (k) { return en() ? MONF[+k.slice(5, 7) - 1] + " " + k.slice(0, 4) : k.slice(0, 4) + "년 " + (+k.slice(5, 7)) + "월"; };
+  var isKey = function (k) { return /^\d{4}-\d{2}-\d{2}$/.test(k || ""); };
+  var todayKey = function () { return dateKey(new Date()); };
+  var nowMin = function () { var d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
+  var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+  var clone = function (o) { return JSON.parse(JSON.stringify(o || {})); };
+  var TAB = "t" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  S.date = todayKey();
+  var unsubRange = null, rangeKey = "", loadTimer = null, view = null, book = null, pendingView = null, statTab = "room";
+
+  function rooms() { return (S.cfg && Array.isArray(S.cfg.rooms)) ? S.cfg.rooms : []; }
+  function roomOf(id) { return rooms().filter(function (r) { return r.id === id; })[0]; }
+  function startMin() { return (S.cfg && S.cfg.startMin) || 480; }
+  function endMin() { return (S.cfg && S.cfg.endMin) || 1200; }
+  function maxDur() { if (S.canEdit) return 0; return (S.cfg && S.cfg.maxDur != null) ? S.cfg.maxDur : 240; }
+  function maxAhead() { return S.canEdit ? 0 : ((S.cfg && S.cfg.maxAhead) || 0); }
+  function cfgList(k) { return (S.cfg && Array.isArray(S.cfg[k])) ? S.cfg[k] : []; }
+  function writable() { return !(S.readOnly || S.canWrite === false) && !!S.db; }
+  function eqText(r) { return (r.eq || []).map(function (k) { return EQ[k] && EQ[k][li()]; }).filter(Boolean).join(", "); }
+  function roomSub(r) { return [r.cap ? t("seats", r.cap) : "", eqText(r)].filter(Boolean).join(" · "); }
+
+  /* A repeating booking is one stored rule; its occurrences are worked out per date. */
+  function occurs(s, date) {
+    if (!s || !s.from || date < s.from || (s.until && date > s.until) || (s.skip && s.skip[date])) return false;
+    var n = diffDays(s.from, date), w = dow(date);
+    if (s.freq === "daily") return w >= 1 && w <= 5;
+    if (s.freq === "biweekly") return n % 14 === 0;
+    if (s.freq === "monthly") return date.slice(8) === s.from.slice(8);
+    if (s.freq === "monthlyNth") return w === dow(s.from) && Math.ceil(+date.slice(8) / 7) === Math.ceil(+s.from.slice(8) / 7);
+    return n % 7 === 0;
+  }
+  function repLabel(freq, from) {
+    var w = wd(from), day = +from.slice(8), nth = NTH[li()][Math.ceil(day / 7) - 1];
+    if (en()) {
+      if (freq === "daily") return "every weekday";
+      if (freq === "biweekly") return "every 2 weeks on " + w;
+      if (freq === "monthly") return "monthly on day " + day;
+      if (freq === "monthlyNth") return "monthly on the " + nth + " " + w;
+      return "weekly on " + w;
+    }
+    if (freq === "daily") return "평일 매일";
+    if (freq === "biweekly") return "격주 " + w + "요일";
+    if (freq === "monthly") return "매월 " + day + "일";
+    if (freq === "monthlyNth") return "매월 " + nth + " " + w + "요일";
+    return "매주 " + w + "요일";
+  }
+  var capFirst = function (s) { return s.charAt(0).toUpperCase() + s.slice(1); };
+  function pick(b, id, date, sid) {
+    var o = { id: id, date: date, room: b.room, start: b.start, end: b.end, name: b.name, title: b.title, by: b.by, byName: b.byName || "", n: b.n, block: !!b.block, project: b.project || "", team: b.team || "" };
+    if (sid) { o.sid = sid; o.end = (b.ends && b.ends[date]) || b.end; o.freq = b.freq; o.from = b.from; o.until = b.until; }
+    return o;
+  }
+  function items(date, map, roomId) {
+    var m = map || S.days[date] || {}, out = [];
+    Object.keys(m).forEach(function (id) { var b = m[id]; if (b && typeof b.start === "number" && typeof b.end === "number") out.push(pick(b, id, date)); });
+    Object.keys(S.series).forEach(function (sid) { var s = S.series[sid]; if (occurs(s, date)) out.push(pick(s, "s:" + sid, date, sid)); });
+    if (roomId) out = out.filter(function (b) { return b.room === roomId; });
+    return out.sort(function (a, b) { return a.start - b.start || (a.room < b.room ? -1 : 1); });
+  }
+  function clash(date, map, room, s, e, skipId) {
+    return items(date, map, room).some(function (b) { return b.id !== skipId && s < b.end && e > b.start; });
+  }
+  function freeUntil(date, room, from, map) {
+    var lim = endMin();
+    items(date, map, room).forEach(function (b) { if (b.start >= from && b.start < lim) lim = b.start; if (b.start < from && b.end > from) lim = from; });
+    return lim;
+  }
+  function isMine(b) {
+    if (b.block) return S.canEdit || S.isOwner;
+    return S.isOwner || S.canEdit || S.myId == null || b.by === S.myId;
+  }
+  function canExtend(b) {
+    if (b.end + SLOT > endMin()) return t("noExtEnd");
+    if (clash(b.date, null, b.room, b.end, b.end + SLOT, b.id)) return t("noExtNext");
+    return "";
+  }
+  function ongoing(b) { var n = nowMin(); return b.date === todayKey() && b.start <= n && b.end > n; }
+  function what(b) { return b.block ? t("blocked") + (b.title ? " · " + b.title : "") : (b.title || b.name || ""); }
+
+  function toast(msg) { var x = $("toast"); x.textContent = msg; x.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { x.hidden = true; }, 3200); }
+  function explain(e) {
+    if (e && e.user) return e.user;
+    var c = e && e.code;
+    if (c === "invalid_argument" || c === "not_granted") { S.readOnly = true; render(); return t("eNoPerm"); }
+    if (c === "quota_exceeded") return t("eQuota");
+    return t("eSave");
+  }
+
+  /* Every change runs under one short lease, so two people cannot take the same slot. */
+  async function locked(fn) {
+    if (!S.db) throw { user: t("eNoConn") };
+    var ref = S.db.doc("locks/main"), got = false;
+    for (var i = 0; i < 8 && !got; i++) {
+      var r = await ref.acquire({ holder: TAB, ttlMs: 8000 });
+      got = !!(r && r.acquired);
+      if (!got) await sleep(350 + Math.random() * 300);
+    }
+    if (!got) throw { user: t("eBusy") };
+    try { await fn(); } finally { if (ref.release) await ref.release(TAB); }
+  }
+  async function readDay(date) {
+    var ref = S.db.doc("days/" + date), snap = await ref.get(), body = snap.exists ? clone(snap.data()) : {};
+    if (!body.bookings || typeof body.bookings !== "object") body.bookings = {};
+    body.date = date; body.month = date.slice(0, 7);
+    return { ref: ref, body: body };
+  }
+  async function readSeries(sid) {
+    var ref = S.db.doc("series/" + sid), snap = await ref.get();
+    if (!snap.exists) throw { user: t("eSeriesGone") };
+    return { ref: ref, body: clone(snap.data()) };
+  }
+  async function dayMap(date) {
+    if (S.rangeLoaded && rangeKey.split(",").indexOf(date.slice(0, 7)) >= 0) return S.days[date] || {};
+    return (await readDay(date)).body.bookings;
+  }
+
+  /* ---------- rendering ---------- */
+  function applyStatic() {
+    document.documentElement.lang = S.lang; document.title = t("title");
+    Array.prototype.forEach.call(document.querySelectorAll("[data-t]"), function (e) { e.textContent = t(e.dataset.t); });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-tp]"), function (e) { e.placeholder = t(e.dataset.tp); });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ta]"), function (e) { e.setAttribute("aria-label", t(e.dataset.ta)); });
+    Array.prototype.forEach.call($("langs").children, function (b) { b.setAttribute("aria-pressed", String(b.dataset.lang === S.lang)); });
+  }
+  function label() {
+    if (S.view === "month") return ym(S.date);
+    if (S.view === "week") { var a = weekStart(S.date), b = addDays(a, 6); return md(a) + " – " + (a.slice(0, 7) === b.slice(0, 7) ? (+b.slice(8)) + (en() ? "" : "일") : md(b)); }
+    return mdw(S.date);
+  }
+  function monthDates(k) {
+    var out = [], last = new Date(+k.slice(0, 4), +k.slice(5, 7), 0).getDate();
+    for (var i = 1; i <= last; i++) out.push(k.slice(0, 8) + pad(i));
+    return out;
+  }
+  function visibleDates() {
+    if (S.door || S.view === "day") return [S.date];
+    var out = [], a, n;
+    if (S.view === "week") { a = weekStart(S.date); n = 7; }
+    else { var ms = monthDates(S.date); a = weekStart(ms[0]); n = diffDays(a, addDays(weekStart(ms[ms.length - 1]), 6)) + 1; }
+    for (var i = 0; i < n; i++) out.push(addDays(a, i));
+    return out;
+  }
+
+  function render() {
+    $("main").hidden = !!S.door; $("door").hidden = !S.door;
+    if (S.door) { renderDoor(); return; }
+    var rs = rooms(), w = writable();
+    $("datelabel").textContent = label(); $("datelabel").title = t("pickDate");
+    $("pick").value = S.date;
+    $("settings").hidden = !S.canEdit;
+    $("tFind").hidden = !w || !rs.length; $("tMine").hidden = !rs.length; $("tStat").hidden = !rs.length;
+    Array.prototype.forEach.call($("views").children, function (b) { b.setAttribute("aria-pressed", String(b.dataset.view === S.view)); });
+
+    var n = $("notice"), msg = "";
+    if (S.dead) msg = t(S.dead);
+    else if (S.slow) msg = t("slow");
+    else if (S.readOnly || S.canWrite === false) msg = t("readOnly");
+    n.textContent = msg; n.hidden = !msg;
+
+    var hint = $("hint");
+    hint.hidden = !rs.length;
+    var weekAll = S.view === "week" && rs.length > 1 && !roomOf(S.room);
+    hint.textContent = S.view === "month" ? t("hintMonth") : (weekAll ? t(w ? "hintWeekAll" : "hintWeekAllRo") : (w ? t("hintGrid") : ""));
+    if (S.view !== "month" && !weekAll) hint.appendChild(el("span", "kbd", t("kbdHint")));          /* 시간표의 키보드 안내 (터치 화면에서는 숨김) */
+
+    var seg = $("roomseg"), segAt = Array.prototype.indexOf.call(seg.children, document.activeElement);   /* 다시 그려도 초점이 그 자리에 남게 */
+    seg.textContent = ""; seg.hidden = S.view === "day" || !rs.length;
+    if (S.cfgLoaded) {                                                                      /* 회의실 목록을 받은 뒤에만 고름 (주소로 받은 회의실을 지우지 않게) */
+      if (S.view === "week" && !roomOf(S.room)) S.room = rs.length === 1 ? rs[0].id : "";   /* "" = 전체 회의실 (회의실이 둘 이상일 때) */
+      if (S.view === "month" && S.room && !roomOf(S.room)) S.room = "";
+    }
+    if (!seg.hidden) {
+      (S.view === "month" || rs.length > 1 ? [{ id: "", name: t("all") }] : []).concat(rs).forEach(function (r) {
+        var b = el("button", null, r.name); b.type = "button"; b.setAttribute("aria-pressed", String(S.room === r.id));
+        b.onclick = function () { S.room = r.id; render(); }; seg.appendChild(b);
+      });
+      if (segAt >= 0 && seg.children[segAt]) seg.children[segAt].focus();
+    }
+    $("tMore").hidden = !$("morePanel").querySelector("button:not([hidden])");
+    syncHash();
+
+    var sheet = $("sheet"), status = $("status");
+    var inGrid = !!(document.activeElement && document.activeElement.dataset && document.activeElement.dataset.c != null && sheet.contains(document.activeElement));
+    sheet.textContent = ""; status.textContent = ""; status.hidden = S.view !== "day";
+    var wrapEl = sheet.parentNode.parentNode; if (wrapEl && wrapEl.setAttribute) wrapEl.setAttribute("data-view", S.view);
+    if (!rs.length) {
+      var em = el("div", "empty");
+      em.appendChild(el("div", null, S.cfgLoaded ? t("noRooms") : t("loadingRooms")));
+      if (S.cfgLoaded && S.canEdit) { var b0 = el("button", "btn primary", t("addFirst")); b0.type = "button"; b0.onclick = openSettings; em.appendChild(b0); }
+      sheet.appendChild(em); return;
+    }
+    if (S.view === "month") renderMonth(sheet);
+    else if (weekAll) renderWeekAll(sheet);
+    else if (S.view === "week") {
+      var room = roomOf(S.room);
+      renderTime(sheet, visibleDates().map(function (d) { return { date: d, room: room, head: wd(d) + " " + (+d.slice(8)), sub: en() ? MON[+d.slice(5, 7) - 1] : (+d.slice(5, 7)) + "월", link: true }; }), "112px");
+    } else {
+      renderStatus(status);
+      renderTime(sheet, rs.map(function (r) { return { date: S.date, room: r, head: r.name, sub: roomSub(r) }; }), "140px");
+    }
+    if (inGrid) { var keep = sheet.querySelector('button[data-c][tabindex="0"]'); if (keep) keep.focus({ preventScroll: true }); }   /* 30초마다 다시 그려도 키보드 자리를 잃지 않게 */
+    if (view && $("dView").open) fillView();
+  }
+
+  /* 시간표 안 키보드 이동 (1.42): 시간표 전체가 Tab 한 자리이고, 방향키로 칸을 옮김 (Home · End = 그 줄의 처음 · 끝) */
+  var gridAt = null;                                  /* { col: "날짜|회의실", start: 분 } — 마지막으로 초점이 있던 칸 */
+  function gridItems(g) { return Array.prototype.filter.call(g.querySelectorAll("button[data-c]"), function (x) { return !x.disabled; }); }
+  function gridPick(g, x) {
+    gridItems(g).forEach(function (y) { y.tabIndex = y === x ? 0 : -1; });
+    gridAt = { col: x.dataset.k, start: +x.dataset.s };
+  }
+  function gridKey(ev) {
+    var g = ev.currentTarget, x = ev.target.closest ? ev.target.closest("button[data-c]") : null, k = ev.key;
+    if (!x || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+    if (["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].indexOf(k) < 0) return;
+    var all = gridItems(g), c = +x.dataset.c, at = +x.dataset.s, to = null;
+    var inCol = function (cc) { return all.filter(function (y) { return +y.dataset.c === cc; }).sort(function (a, b) { return a.dataset.s - b.dataset.s; }); };
+    var near = function (list) {                      /* 같은 시각을 품은 칸, 없으면 가장 가까운 칸 */
+      var hit = list.filter(function (y) { return +y.dataset.s <= at && at < +y.dataset.e; })[0];
+      return hit || list.slice().sort(function (a, b) { return Math.abs(a.dataset.s - at) - Math.abs(b.dataset.s - at); })[0] || null;
+    };
+    if (k === "ArrowDown" || k === "ArrowUp") { var col = inCol(c); to = col[col.indexOf(x) + (k === "ArrowDown" ? 1 : -1)] || null; }
+    else if (k === "Home" || k === "End") { var col2 = inCol(c); to = col2[k === "Home" ? 0 : col2.length - 1] || null; }
+    else { var step = k === "ArrowRight" ? 1 : -1, n = +g.dataset.n; for (var cc = c + step; cc >= 0 && cc < n && !to; cc += step) to = near(inCol(cc)); }
+    ev.preventDefault();
+    if (to && to !== x) { gridPick(g, to); to.focus(); }
+  }
+  function gridInit(g, n) {
+    var its = gridItems(g), today = todayKey(), now = nowMin(), pick = null;
+    var order = function (a, b) { return (a.dataset.c - b.dataset.c) || (a.dataset.s - b.dataset.s); };
+    if (gridAt) pick = its.filter(function (y) { return y.dataset.k === gridAt.col && +y.dataset.s <= gridAt.start && gridAt.start < +y.dataset.e; })[0];
+    if (!pick) pick = its.filter(function (y) { return y.dataset.k.slice(0, 10) === today && +y.dataset.e > now; }).sort(order)[0] || its.slice().sort(order)[0];   /* 오늘이면 지금 시각의 칸부터 */
+    its.forEach(function (y) { y.tabIndex = y === pick ? 0 : -1; });
+    g.dataset.n = n; g.setAttribute("role", "group"); g.setAttribute("aria-label", t("gridAria"));
+    g.addEventListener("keydown", gridKey);
+    g.addEventListener("focusin", function (ev) { var x = ev.target.closest ? ev.target.closest("button[data-c]") : null; if (x && x.tabIndex !== 0) gridPick(g, x); else if (x) gridAt = { col: x.dataset.k, start: +x.dataset.s }; });
+  }
+
+  function renderStatus(status) {
+    var isToday = S.date === todayKey(), now = nowMin();
+    rooms().forEach(function (r) {
+      var bs = items(S.date, null, r.id), chip = el("div", "chip");
+      chip.appendChild(el("span", "room", r.name));
+      if (isToday) {
+        var cur = bs.filter(function (b) { return b.start <= now && b.end > now; })[0];
+        var nxt = bs.filter(function (b) { return b.start > now; })[0];
+        if (cur) {
+          chip.classList.add("busy");
+          chip.appendChild(el("span", "state", cur.block ? t("blocked") : t("inUse")));
+          chip.appendChild(el("span", "sub", t("untilWho", fmt(cur.end), cur.block ? (cur.title || t("maint")) : (cur.name || ""))));
+        } else {
+          chip.appendChild(el("span", "state", t("free")));
+          chip.appendChild(el("span", "sub", nxt ? t("nextAt", fmt(nxt.start)) : t("noMoreToday")));
+        }
+      } else {
+        var real = bs.filter(function (b) { return !b.block; });
+        if (bs.length) chip.classList.add("busy");
+        chip.appendChild(el("span", "state", real.length ? t("nBookings", real.length) : (bs.length ? t("hasBlock") : t("none"))));
+        chip.appendChild(el("span", "sub", bs.length ? t("firstAt", fmt(bs[0].start)) : t("allDayFree")));
+      }
+      var lk = el("button", "linkbtn", t("openDoor")); lk.type = "button";
+      lk.onclick = function () { location.hash = "door-" + r.id; readHash(); };
+      chip.appendChild(lk);
+      status.appendChild(chip);
+    });
+  }
+
+  function renderTime(sheet, cols, colmin) {
+    var sMin = startMin(), eMin = endMin(), rowsN = Math.max(1, (eMin - sMin) / SLOT), now = nowMin(), today = todayKey(), w = writable();
+    var g = el("div", "grid");
+    g.style.setProperty("--n", cols.length); g.style.setProperty("--rows", rowsN); g.style.setProperty("--colmin", colmin);
+    var corner = el("div", "corner"); corner.style.gridColumn = "1"; corner.style.gridRow = "1"; g.appendChild(corner);
+    for (var i = 0; i < rowsN; i++) {
+      var m = sMin + i * SLOT;
+      if (m % 60 === 0 || i === 0) { var tm = el("div", "time", fmt(m)); tm.style.gridColumn = "1"; tm.style.gridRow = (i + 2) + " / span " + (m % 60 === 0 ? Math.min(2, rowsN - i) : 1); g.appendChild(tm); }
+    }
+    cols.forEach(function (col, c) {
+      var isToday = col.date === today;
+      var h = el("div", "colhead" + (col.link && isToday ? " today" : "") + (col.link ? " link" : "")); h.style.gridColumn = String(c + 2); h.style.gridRow = "1";
+      h.appendChild(el("b", null, col.head)); if (col.sub) h.appendChild(el("span", null, col.sub));
+      if (col.link) h.onclick = function () { setView("day", col.date); };
+      g.appendChild(h);
+      var bs = items(col.date, null, col.room.id).filter(function (b) { return b.end > sMin && b.start < eMin; });
+      for (var i = 0; i < rowsN; i++) {
+        var m = sMin + i * SLOT;
+        if (bs.some(function (b) { return b.start < m + SLOT && b.end > m; })) continue;
+        var past = col.date < today || (isToday && m + SLOT <= now);
+        var cell = el("button", "cell" + (m % 60 === 0 ? " hour" : "") + (past ? " past" : ""));
+        cell.type = "button"; cell.style.gridColumn = String(c + 2); cell.style.gridRow = String(i + 2);
+        cell.setAttribute("aria-label", t("cellAria", mdw(col.date), col.room.name, fmt(m)));
+        cell.dataset.c = c; cell.dataset.k = col.date + "|" + col.room.id; cell.dataset.s = m; cell.dataset.e = m + SLOT;
+        if (past || !w) cell.disabled = true; else { cell.appendChild(el("span", null, t("cellBook"))); cell.onclick = openBook.bind(null, { date: col.date, room: col.room.id, start: m }); }
+        g.appendChild(cell);
+      }
+      bs.forEach(function (b) {
+        var s = Math.max(b.start, sMin), e = Math.min(b.end, eMin), mine = !b.block && S.myId != null && b.by === S.myId;
+        var k = el("button", "bk" + (b.block ? " block" : (mine ? " mine" : ""))); k.type = "button";
+        k.style.gridColumn = String(c + 2);
+        k.style.gridRow = ((s - sMin) / SLOT + 2) + " / span " + Math.max(1, (e - s) / SLOT);
+        var l1 = el("span", "l1"); l1.appendChild(el("span", null, span(b)));
+        if (b.sid) l1.appendChild(el("span", "rep", t("repTag")));
+        if (w && mine && !canExtend(b)) l1.appendChild(el("span", "plus", t("plus30")));
+        var l2 = el("span", "l2");
+        l2.appendChild(el("b", null, b.block ? t("blocked") : (b.name || ""))); if (b.title) l2.appendChild(document.createTextNode(" · " + b.title));
+        k.appendChild(l1); k.appendChild(l2);
+        k.onclick = openView.bind(null, b.date, b.id);
+        k.dataset.c = c; k.dataset.k = col.date + "|" + col.room.id; k.dataset.s = s; k.dataset.e = e;
+        g.appendChild(k);
+      });
+      if (isToday && now >= sMin && now < eMin && (col.link || c === 0)) {
+        var idx = Math.floor((now - sMin) / SLOT), line = el("div", "nowline");
+        line.style.gridColumn = col.link ? String(c + 2) : "2 / -1";
+        line.style.gridRow = String(idx + 2);
+        line.style.marginTop = "calc(" + (((now - sMin) % SLOT) / SLOT) + " * var(--row))";
+        g.appendChild(line);
+      }
+    });
+    sheet.appendChild(g);
+    gridInit(g, cols.length);
+  }
+
+  /* 주간 · 전체 회의실: 줄 = 회의실, 칸 = 요일. 칸 위의 띠는 운영 시간 중 예약된 구간, 아래는 그날의 예약 목록 */
+  function firstFree(date, roomId, from) {
+    for (var m = Math.max(startMin(), from); m + SLOT <= endMin(); m += SLOT) if (!clash(date, null, roomId, m, m + SLOT)) return m;
+    return null;
+  }
+  function renderWeekAll(sheet) {
+    var ds = visibleDates(), rs = rooms(), today = todayKey(), now = nowMin(), w = writable(), sMin = startMin(), eMin = endMin(), open = Math.max(SLOT, eMin - sMin);
+    var g = el("div", "wkall"); g.style.setProperty("--n", ds.length);
+    g.appendChild(el("div", "wk-corner", t("roomCol")));
+    ds.forEach(function (d) {
+      var h = el("button", "wk-day" + (d === today ? " today" : "")); h.type = "button"; h.setAttribute("aria-label", t("dayAria", mdw(d)));
+      h.appendChild(el("b", null, wd(d) + " " + (+d.slice(8)))); h.appendChild(el("span", null, en() ? MON[+d.slice(5, 7) - 1] : (+d.slice(5, 7)) + "월"));
+      h.onclick = function () { setView("day", d); };
+      g.appendChild(h);
+    });
+    rs.forEach(function (r) {
+      var rh = el("button", "wk-room"); rh.type = "button"; rh.setAttribute("aria-label", t("wkRoomAria", r.name));
+      rh.appendChild(el("b", null, r.name)); var sub = roomSub(r); if (sub) rh.appendChild(el("span", null, sub));
+      rh.onclick = function () { S.room = r.id; render(); };
+      g.appendChild(rh);
+      ds.forEach(function (d) {
+        var bs = items(d, null, r.id), isToday = d === today, past = d < today, used = 0;
+        var cell = el("div", "wk-cell" + (isToday ? " today" : "") + (past ? " past" : ""));
+        var bar = el("div", "wk-bar");
+        bs.forEach(function (b) {
+          var s = Math.max(b.start, sMin), e = Math.min(b.end, eMin); if (e <= s) return;
+          var mine = !b.block && S.myId != null && b.by === S.myId, f = el("i", b.block ? "block" : (mine ? "mine" : ""));
+          f.style.left = (100 * (s - sMin) / open) + "%"; f.style.width = (100 * (e - s) / open) + "%"; bar.appendChild(f); used += e - s;
+        });
+        bar.setAttribute("role", "img"); bar.setAttribute("aria-label", t("wkBarAria", mdw(d), r.name, Math.round(100 * Math.min(1, used / open)) + "%"));
+        cell.appendChild(bar);
+        bs.forEach(function (b) {
+          var mine = !b.block && S.myId != null && b.by === S.myId;
+          var it = el("button", "wi" + (b.block ? " block" : (mine ? " mine" : ""))); it.type = "button";
+          var l1 = el("span", "mono", span(b)); if (b.sid) l1.appendChild(el("span", "rep", t("repTag")));
+          var l2 = el("span", "tx"); l2.appendChild(el("b", null, b.block ? t("blocked") : (b.name || ""))); if (b.title) l2.appendChild(document.createTextNode(" · " + b.title));
+          it.appendChild(l1); it.appendChild(l2); it.title = span(b) + " · " + l2.textContent;
+          it.onclick = function () { openView(b.date, b.id); };
+          cell.appendChild(it);
+        });
+        if (w && !past) {
+          var free = firstFree(d, r.id, isToday ? Math.floor(now / SLOT) * SLOT : sMin);
+          if (free != null) {
+            var add = el("button", "wk-add", t("cellBook")); add.type = "button";
+            add.setAttribute("aria-label", t("cellAria", mdw(d), r.name, fmt(free)));
+            add.onclick = openBook.bind(null, { date: d, room: r.id, start: free });
+            cell.appendChild(add);
+          } else if (bs.length) cell.appendChild(el("span", "wk-full", t("wkFull")));
+        }
+        g.appendChild(cell);
+      });
+    });
+    sheet.appendChild(g);
+  }
+
+  /* 월간 한 줄(1주)의 높이: 달력 전체가 한 화면에 들어오게 남은 높이를 주 수로 나눔 (1.41).
+     아주 낮은 창(한 줄에 예약 한 건도 못 적는 높이)이면 예전처럼 112px 로 두고 화면을 내려 봄 */
+  function monthRowH(sheet, g, weeks) {
+    var box = sheet.parentNode.getBoundingClientRect(), top = box.top + (window.pageYOffset || document.documentElement.scrollTop || 0);
+    var head = g.firstChild ? g.firstChild.getBoundingClientRect().height : 34;
+    var badge = document.getElementById("lw-dock") || document.getElementById("lw-badge");      /* 포털이 왼쪽 아래에 띄우는 단추 — 달력 마지막 줄을 가리지 않게 그 위에서 끝냄 */
+    var below = badge ? Math.max(16, window.innerHeight - badge.getBoundingClientRect().top + 8) : (window.LW ? 56 : 16);
+    var fit = Math.floor((window.innerHeight - top - head - 2 - below) / weeks);   /* 2 = 상자 테두리 */
+    return fit >= 56 ? Math.min(fit, 200) : 112;
+  }
+  function renderMonth(sheet) {
+    var g = el("div", "month"), today = todayKey(), month = S.date.slice(0, 7), many = rooms().length > 1 && !S.room;
+    [1, 2, 3, 4, 5, 6, 0].forEach(function (d) { g.appendChild(el("div", "wd", WDS[li()][d])); });
+    sheet.appendChild(g);                                                        /* 먼저 붙여 놓고 자리를 잼 */
+    var dates = visibleDates(), weeks = Math.ceil(dates.length / 7), rowH = monthRowH(sheet, g, weeks);
+    var cap = Math.max(1, Math.floor((rowH - 33) / 23));                         /* 한 칸에 적을 수 있는 줄 수 (날짜 24 + 여백 12 − 틈 3, 한 줄 20 + 틈 3) */
+    g.style.gridTemplateRows = "auto repeat(" + weeks + ", " + rowH + "px)";
+    dates.forEach(function (d) {
+      var cell = el("div", "mday" + (d.slice(0, 7) !== month ? " out" : "") + (d === today ? " today" : ""));
+      var num = el("button", "num", String(+d.slice(8))); num.type = "button"; num.setAttribute("aria-label", t("dayAria", mdw(d)));
+      cell.appendChild(num);
+      cell.onclick = function () { setView("day", d); };
+      var bs = items(d, null, S.room || null).filter(function (b) { return roomOf(b.room); });
+      var show = bs.length <= cap ? bs.length : cap - 1;                         /* 넘치면 마지막 줄은 "+N건 더" (한 줄뿐이면 "예약 N건") */
+      bs.slice(0, show).forEach(function (b) {
+        var mine = !b.block && S.myId != null && b.by === S.myId;
+        var it = el("button", "mi" + (b.block ? " block" : (mine ? " mine" : ""))); it.type = "button";
+        it.appendChild(el("span", "mono", fmt(b.start)));
+        it.appendChild(document.createTextNode((many ? roomOf(b.room).name + " · " : "") + what(b)));
+        it.onclick = function (ev) { ev.stopPropagation(); openView(b.date, b.id); };
+        cell.appendChild(it);
+      });
+      if (bs.length > show) cell.appendChild(el("span", "more", show ? t("more", bs.length - show) : t("cnt", bs.length)));
+      g.appendChild(cell);
+    });
+  }
+
+  /* ---------- door sign ---------- */
+  function renderDoor() {
+    var box = $("door"), keep = $("dName") ? $("dName").value : null, hadFocus = document.activeElement && document.activeElement.id === "dName";
+    box.textContent = "";
+    var room = roomOf(S.door), now = nowMin(), today = todayKey(), w = writable();
+    var head = el("div", "doorhead");
+    var back = el("button", "linkbtn", t("back")); back.type = "button"; back.onclick = function () { location.hash = ""; S.door = null; subscribeRange(); render(); };
+    head.appendChild(back); head.appendChild(el("span", "clock", mdw(today) + " " + fmt(now)));
+    box.appendChild(head);
+    if (S.dead) box.appendChild(el("div", "notice", t(S.dead)));
+    if (!room) { box.appendChild(el("div", "empty", S.cfgLoaded ? t("roomGone") : t("loadingRooms"))); return; }
+    var bs = items(today, null, room.id);
+    var cur = bs.filter(function (b) { return b.start <= now && b.end > now; })[0];
+    var nxt = bs.filter(function (b) { return b.start > now; })[0];
+    var p = el("div", "panel" + (cur ? " busy" : ""));
+    p.appendChild(el("div", "rname", room.name));
+    p.appendChild(el("div", "st", cur ? (cur.block ? t("blocked") : t("inUse")) : t("free")));
+    if (cur) p.appendChild(el("div", "what", span(cur) + " · " + (cur.block ? (cur.title || t("maint")) : [cur.title, cur.name].filter(Boolean).join(" · "))));
+    p.appendChild(el("div", "next", nxt ? t("nextLine", span(nxt), what(nxt)) : t("noMoreToday")));
+    box.appendChild(p);
+
+    var act = el("div", "dooract");
+    if (w && !cur && now < endMin() && now >= startMin() - SLOT) {
+      var start = Math.max(startMin(), Math.floor(now / SLOT) * SLOT), free = freeUntil(today, room.id, start) - start;
+      var nm = el("input"); nm.type = "text"; nm.id = "dName"; nm.maxLength = 20; nm.placeholder = t("lName"); nm.setAttribute("aria-label", t("lName"));
+      nm.value = keep != null ? keep : (store("roomBookName") || "");
+      act.appendChild(nm);
+      [30, 60].forEach(function (d) {
+        var b = el("button", "btn primary", t("useNow", durText(d))); b.type = "button"; b.disabled = free < d;
+        b.onclick = async function () {
+          var name = ($("dName").value || "").trim() || t("walkIn");
+          b.disabled = true;
+          try {
+            await locked(async function () {
+              var dd = await readDay(today);
+              if (clash(today, dd.body.bookings, room.id, start, start + d)) throw { user: t("justTaken") };
+              dd.body.bookings["b" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)] = { room: room.id, start: start, end: start + d, name: name, title: "", by: S.myId || "", byName: S.myName || "", at: Date.now() };
+              await dd.ref.set(dd.body);
+            });
+            store("roomBookName", name);
+            toast(t("booked", fmt(start) + "–" + fmt(start + d)));
+          } catch (e) { toast(explain(e)); }
+        };
+        act.appendChild(b);
+      });
+      if (free < 30) act.appendChild(el("span", "why", t("under30")));
+    } else if (w && cur && isMine(cur)) {
+      var why = canExtend(cur), ex = el("button", "btn primary", t("extend30")), enb = el("button", "btn", t("endNow"));
+      ex.type = "button"; enb.type = "button"; ex.disabled = !!why;
+      ex.onclick = function () { ex.disabled = true; doExtend(cur).then(function () { toast(t("extended")); }, function (e) { toast(explain(e)); render(); }); };
+      enb.onclick = function () { enb.disabled = true; doEndNow(cur).then(function () { toast(t("ended")); }, function (e) { toast(explain(e)); render(); }); };
+      act.appendChild(ex); act.appendChild(enb);
+      if (why) act.appendChild(el("span", "why", why));
+    }
+    if (act.children.length) box.appendChild(act);
+    if (hadFocus && $("dName")) $("dName").focus();
+
+    var list = el("div", "list");
+    bs.forEach(function (b) {
+      var it = el("div", "item"), l = el("div");
+      l.appendChild(el("div", "t", what(b))); if (!b.block && b.title) l.appendChild(el("div", "s", b.name || ""));
+      it.appendChild(l); it.appendChild(el("span", "mono", span(b)));
+      if (b.end <= now) it.style.opacity = ".55";
+      list.appendChild(it);
+    });
+    if (!bs.length) list.appendChild(el("p", "why", t("noToday")));
+    box.appendChild(list);
+  }
+
+  /* ---------- booking dialog (new + edit) ---------- */
+  function fillSelect(sel, opts, val) {
+    sel.textContent = "";
+    opts.forEach(function (o) { var x = el("option", null, o[1]); x.value = String(o[0]); sel.appendChild(x); });
+    if (val != null && opts.some(function (o) { return String(o[0]) === String(val); })) sel.value = String(val);
+  }
+  function fillList(id, key, extra) {
+    var box = $(id), seen = {}; box.textContent = "";
+    cfgList(key).concat(extra ? [extra] : []).forEach(function (v) { if (v && !seen[v]) { seen[v] = 1; var o = el("option"); o.value = v; box.appendChild(o); } });
+  }
+  function roomOpts() { return rooms().map(function (r) { return [r.id, r.name + (r.cap ? " (" + t("seats", r.cap) + ")" : "")]; }); }
+  function startOpts(extra) {
+    var out = []; for (var m = startMin(); m < endMin(); m += SLOT) out.push([m, fmt(m)]);
+    if (extra != null && !out.some(function (o) { return o[0] === extra; })) out.unshift([extra, fmt(extra)]);
+    return out;
+  }
+  function durOpts(start, want, noLimit) {
+    var lim = endMin() - start, mx = noLimit ? 0 : maxDur(), out = [];
+    if (mx) lim = Math.min(lim, mx);
+    lim = Math.max(lim, want || SLOT, SLOT);
+    for (var m = SLOT; m <= lim; m += SLOT) out.push([m, t("durOpt", durText(m), fmt(start + m))]);
+    return out;
+  }
+  function untilMax(d) { var a = maxAhead(), m = addDays(d, 365); if (a) { var x = addDays(todayKey(), a); if (x < m) m = x; } return m; }
+  function saveLabel() { return book.mode === "edit" ? t("save") : ($("bBlock").checked ? t("saveBlock") : t("book")); }
+  function refreshBook() {
+    var start = +$("bStart").value, cur = +$("bDur").value || book.dur || 60, block = $("bBlock").checked;
+    var opts = durOpts(start, book.mode === "edit" ? book.dur : 0, block);
+    fillSelect($("bDur"), opts, opts.some(function (o) { return o[0] === cur; }) ? cur : opts[Math.min(1, opts.length - 1)][0]);
+    var d = $("bDate").value, rv = $("bRep").value, ok = isKey(d) ? d : todayKey();
+    fillSelect($("bRep"), [["", t("repNone")]].concat(["daily", "weekly", "biweekly", "monthly", "monthlyNth"].map(function (f) { return [f, capFirst(repLabel(f, ok))]; })), rv);
+    $("bUntil").min = addDays(ok, 1); $("bUntil").max = untilMax(ok);
+    var room = roomOf($("bRoom").value), n = parseInt($("bN").value, 10) || 0, warn = $("bWarn");
+    warn.hidden = !(room && room.cap && n > room.cap);
+    if (!warn.hidden) warn.textContent = t("capWarn", room.name, room.cap);
+    $("bTitleLab").textContent = block ? t("lReason") : t("lTitle");
+    $("bN").disabled = block;
+    $("bSave").textContent = saveLabel();
+    book.skipOK = false; $("bErr").textContent = "";
+    syncOpt();
+  }
+  /* '추가 정보' 를 접어 두어도 무엇이 들어 있는지 보이게 요약을 적음 */
+  function syncOpt() {
+    var parts = [], rp = $("bRep"), n = parseInt($("bN").value, 10) || 0;
+    if (!$("bRepRow").hidden && rp.value && rp.selectedOptions[0]) parts.push(rp.selectedOptions[0].textContent);
+    if ($("bProject").value.trim()) parts.push($("bProject").value.trim());
+    if ($("bTeam").value.trim()) parts.push($("bTeam").value.trim());
+    if (n && !$("bBlock").checked) parts.push(t("nPeople", n));
+    if ($("bBlock").checked) parts.push(t("blocked"));
+    $("bMoreSum").textContent = parts.length ? "· " + parts.join(" · ") : "";
+  }
+  function defaultUntil() {
+    var f = $("bRep").value, d = $("bDate").value, u = addDays(d, f === "daily" ? 28 : (f === "weekly" || f === "biweekly") ? 84 : 180), mx = untilMax(d);
+    return u > mx ? mx : u;
+  }
+  function openBook(o) {
+    book = { mode: "new", skipOK: false, dur: 0 };
+    $("bHead").textContent = t("hNew");
+    fillSelect($("bRoom"), roomOpts(), o.room);
+    $("bDate").value = o.date; $("bDate").min = todayKey(); $("bDate").max = maxAhead() ? addDays(todayKey(), maxAhead()) : "";
+    fillSelect($("bStart"), startOpts(), o.start);
+    $("bBlock").checked = false; $("bBlockBox").hidden = !S.canEdit;
+    $("bRepRow").hidden = false; $("bRep").value = ""; $("bUntilBox").hidden = true; $("bNote").hidden = true;
+    $("bName").value = store("roomBookName") || $("bName").value;
+    var lp = store("roomBookProject"), lt = store("roomBookTeam");          /* 지난번에 쓴 값, 처음이면 포털 프로필의 프로젝트 · 팀 */
+    $("bProject").value = lp != null ? lp : (S.myProject || "").slice(0, 30); $("bTeam").value = lt != null ? lt : (S.myTeam || "").slice(0, 30);
+    $("bMore").open = false;
+    fillList("plist", "projects", $("bProject").value); fillList("tlist", "teams", $("bTeam").value);
+    $("bN").value = o.n || ""; $("bTitle").value = ""; $("bDur").value = "";
+    refreshBook();
+    var want = o.dur || Math.min(60, Math.max(SLOT, freeUntil(o.date, o.room, o.start) - o.start));
+    if (Array.prototype.some.call($("bDur").options, function (x) { return +x.value === want; })) $("bDur").value = String(want);
+    $("dBook").showModal(); ($("bName").value ? $("bTitle") : $("bName")).focus();
+  }
+  function openEdit(b) {
+    book = { mode: "edit", orig: b, skipOK: false, dur: b.end - b.start };
+    $("bHead").textContent = b.block ? t("hEditBlock") : t("hEdit");
+    fillSelect($("bRoom"), roomOpts(), b.room);
+    $("bDate").value = b.date; $("bDate").min = b.date < todayKey() ? b.date : todayKey(); $("bDate").max = maxAhead() ? addDays(todayKey(), maxAhead()) : "";
+    fillSelect($("bStart"), startOpts(b.start), b.start);
+    $("bBlock").checked = !!b.block; $("bBlockBox").hidden = true;
+    $("bRepRow").hidden = true; $("bRep").value = ""; $("bNote").hidden = !b.sid;
+    $("bName").value = b.name || ""; $("bN").value = b.n || ""; $("bTitle").value = b.title || "";
+    $("bProject").value = b.project || ""; $("bTeam").value = b.team || "";
+    fillList("plist", "projects", b.project); fillList("tlist", "teams", b.team);
+    $("bDur").value = "";
+    $("bMore").open = !!(b.n || b.project || b.team);
+    refreshBook(); $("bDur").value = String(book.dur);
+    $("dView").close(); $("dBook").showModal();
+  }
+  ["bRoom", "bDate", "bStart", "bN", "bBlock"].forEach(function (id) { $(id).addEventListener("change", refreshBook); });
+  $("bN").addEventListener("input", refreshBook);
+  $("bRep").onchange = function () { $("bUntilBox").hidden = !this.value; if (this.value) $("bUntil").value = defaultUntil(); book.skipOK = false; $("bErr").textContent = ""; $("bSave").textContent = saveLabel(); syncOpt(); };
+  ["bProject", "bTeam"].forEach(function (id) { $(id).addEventListener("input", syncOpt); });
+  $("fBook").addEventListener("invalid", function (ev) { if ($("bMore").contains(ev.target)) $("bMore").open = true; }, true);   /* 접힌 칸의 값이 틀리면 펼쳐서 보여 줌 */
+  $("bUntil").onchange = $("bDur").onchange = function () { if (book) { book.skipOK = false; $("bSave").textContent = saveLabel(); } $("bErr").textContent = ""; };
+
+  $("fBook").addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    if (!book) return;
+    var name = $("bName").value.trim(), title = $("bTitle").value.trim(), dur = +$("bDur").value || SLOT, freq = book.mode === "new" ? $("bRep").value : "";
+    var date = $("bDate").value, roomId = $("bRoom").value, start = +$("bStart").value, today = todayKey(), block = $("bBlock").checked, n = parseInt($("bN").value, 10) || 0;
+    var project = $("bProject").value.trim(), team = $("bTeam").value.trim();
+    var room = roomOf(roomId), orig = book.orig, done = "", err = "";
+    if (!name) err = t("eName");
+    else if (!room || !isKey(date)) err = t("eRoomDate");
+    else if (date < today || (date === today && start + dur <= nowMin())) err = t("ePast");
+    else if (maxAhead() && date > addDays(today, maxAhead())) err = t("eAhead", maxAhead());
+    else if (!block && maxDur() && dur > maxDur()) err = t("eMaxDur", durText(maxDur()));
+    if (err) { $("bErr").textContent = err; return; }
+    if (freq) $("bMore").open = true;                                   /* 반복 예약의 오류(종료일 · 겹치는 날)는 접힌 칸에 관한 것이라 펼쳐 둠 */
+    var b = { room: roomId, start: start, end: start + dur, name: name, title: title, by: orig ? (orig.by || "") : (S.myId || ""), byName: orig ? (orig.byName || "") : (S.myName || ""), at: Date.now() };
+    if (n && !block) b.n = n;
+    if (project) b.project = project;
+    if (team) b.team = team;
+    if (block) b.block = true;
+    var id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7), when = fmt(b.start) + "–" + fmt(b.end);
+    $("bSave").disabled = true;
+    try {
+      if (book.mode === "edit") {
+        await locked(async function () {
+          var d = await readDay(date);
+          if (clash(date, d.body.bookings, b.room, b.start, b.end, orig.date === date ? orig.id : null)) throw { user: t("eClash") };
+          if (orig.sid) {
+            var s = await readSeries(orig.sid);
+            if (!s.body.skip) s.body.skip = {};
+            s.body.skip[orig.date] = true;
+            await s.ref.set(s.body);
+            d.body.bookings["b" + id] = b;
+          } else if (orig.date === date) {
+            if (!d.body.bookings[orig.id]) throw { user: t("eGone") };
+            d.body.bookings[orig.id] = b;
+          } else {
+            var o = await readDay(orig.date);
+            if (!o.body.bookings[orig.id]) throw { user: t("eGone") };
+            delete o.body.bookings[orig.id];
+            await o.ref.set(o.body);
+            d.body.bookings[orig.id] = b;
+          }
+          await d.ref.set(d.body);
+        });
+        done = t("dEdit");
+      } else if (!freq) {
+        await locked(async function () {
+          var d = await readDay(date);
+          if (clash(date, d.body.bookings, b.room, b.start, b.end)) throw { user: t("eClash") };
+          d.body.bookings["b" + id] = b;
+          await d.ref.set(d.body);
+        });
+        done = t(block ? "dBlocked" : "dBooked", room.name, when);
+      } else {
+        var until = $("bUntil").value;
+        if (!isKey(until) || until <= date) throw { user: t("eUntil") };
+        if (until > untilMax(date)) throw { user: t("eUntilMax", md(untilMax(date))) };
+        var rule = Object.assign({}, b, { freq: freq, from: date, until: until, skip: {}, ends: {} });
+        var dates = []; for (var k = date; k <= until; k = addDays(k, 1)) if (occurs(rule, k)) dates.push(k);
+        if (!dates.length) throw { user: t("eNoDates") };
+        var count = dates.length;
+        await locked(async function () {
+          var months = {}, maps = {}; dates.forEach(function (k) { months[k.slice(0, 7)] = 1; });
+          var snap = await S.db.collection("days").where("month", "in", Object.keys(months)).get();
+          snap.docs.forEach(function (doc) { var x = doc.data() || {}; maps[doc.id] = x.bookings || {}; });
+          var bad = dates.filter(function (k) { return clash(k, maps[k] || {}, rule.room, rule.start, rule.end); });
+          if (bad.length === dates.length) throw { user: t("eAllClash") };
+          if (bad.length && !book.skipOK) {
+            book.skipOK = true; $("bSave").textContent = t("skipSave");
+            throw { user: t("eSome", bad.slice(0, 3).map(mdw).join(", ") + (bad.length > 3 ? t("andMore", bad.length - 3) : "")) };
+          }
+          bad.forEach(function (k) { rule.skip[k] = true; });
+          count = dates.length - bad.length;
+          await S.db.doc("series/s" + id).set(rule);
+        });
+        done = t("dSeries", repLabel(freq, date), count);
+      }
+      if (book.mode === "new" && !block) { store("roomBookName", name); store("roomBookProject", project); store("roomBookTeam", team); }
+      $("dBook").close(); toast(done);
+    } catch (e) { $("bErr").textContent = explain(e); }
+    $("bSave").disabled = false;
+  });
+
+  /* ---------- view / extend / end / cancel ---------- */
+  async function doExtend(b) {
+    await locked(async function () {
+      var d = await readDay(b.date), end;
+      if (b.sid) {
+        var s = await readSeries(b.sid);
+        end = (s.body.ends && s.body.ends[b.date]) || s.body.end;
+        if (end + SLOT > endMin()) throw { user: t("noExtEnd") };
+        if (clash(b.date, d.body.bookings, b.room, end, end + SLOT, b.id)) throw { user: t("noExtNext") };
+        if (!s.body.ends) s.body.ends = {};
+        s.body.ends[b.date] = end + SLOT;
+        await s.ref.set(s.body);
+      } else {
+        var x = d.body.bookings[b.id]; if (!x) throw { user: t("eGone") };
+        if (x.end + SLOT > endMin()) throw { user: t("noExtEnd") };
+        if (clash(b.date, d.body.bookings, x.room, x.end, x.end + SLOT, b.id)) throw { user: t("noExtNext") };
+        x.end += SLOT;
+        await d.ref.set(d.body);
+      }
+    });
+  }
+  async function doEndNow(b) {
+    var ne = Math.max(b.start + SLOT, Math.ceil(nowMin() / SLOT) * SLOT);
+    if (ne >= b.end) throw { user: t("tooShort") };
+    await locked(async function () {
+      if (b.sid) { var s = await readSeries(b.sid); if (!s.body.ends) s.body.ends = {}; s.body.ends[b.date] = ne; await s.ref.set(s.body); }
+      else { var d = await readDay(b.date), x = d.body.bookings[b.id]; if (!x) throw { user: t("eGone") }; x.end = ne; await d.ref.set(d.body); }
+    });
+  }
+  function current() { return view ? items(view.date).filter(function (b) { return b.id === view.id; })[0] : null; }
+  function openView(date, id) { view = { date: date, id: id }; $("vErr").textContent = ""; disarm(); fillView(); if (view && !$("dView").open) $("dView").showModal(); }
+  function fillView() {
+    var b = current();
+    if (!b) { if ($("dView").open) $("dView").close(); view = null; return; }
+    var room = roomOf(b.room);
+    $("vTitle").textContent = b.block ? t("blocked") + (b.title ? " · " + b.title : "") : (b.title || t("vDefault"));
+    $("vRoom").textContent = (room ? room.name + " · " : "") + mdw(b.date);
+    $("vTime").textContent = span(b);
+    $("vName").textContent = t(b.block ? "regLine" : "byLine", b.name || "") + (b.n ? t("attend", b.n) : "");
+    $("vGroup").textContent = [b.project ? t("lProject") + " " + b.project : "", b.team ? t("lTeam") + " " + b.team : ""].filter(Boolean).join(" · ");
+    $("vRep").textContent = b.sid ? t("repLine", repLabel(b.freq, b.from), md(b.until)) : "";
+    var w = writable(), mine = w && isMine(b), why = canExtend(b), past = b.date < todayKey() || (b.date === todayKey() && b.end <= nowMin());
+    $("vExtend").hidden = !mine || past; $("vCancel").hidden = !mine; $("vCancelAll").hidden = !(mine && b.sid);
+    $("vEdit").hidden = !mine || past; $("vEnd").hidden = !(mine && ongoing(b) && b.end - Math.ceil(nowMin() / SLOT) * SLOT >= SLOT);
+    $("vExtend").disabled = !!why;
+    $("vExtend").textContent = why ? t("extend30") : t("extTo", fmt(b.end + SLOT));
+    if (!armed) { $("vCancel").textContent = b.sid ? t("cancelOne") : (b.block ? t("unblock") : t("cancel")); $("vCancelAll").textContent = t("cancelAll"); }
+    $("vWhy").textContent = mine ? (past ? "" : (why || t("canExt") + (b.sid ? t("extOnly") : ""))) : (w ? (b.block ? t("adminBlock") : t("ownerOnly")) : "");
+  }
+  $("vExtend").onclick = async function () {
+    var b = current(); if (!b) return;
+    this.disabled = true;
+    try { await doExtend(b); toast(t("extended")); } catch (e) { $("vErr").textContent = explain(e); }
+    if ($("dView").open) fillView();
+  };
+  $("vEnd").onclick = async function () {
+    var b = current(); if (!b) return;
+    this.disabled = true;
+    try { await doEndNow(b); toast(t("ended")); } catch (e) { $("vErr").textContent = explain(e); }
+    this.disabled = false;
+    if ($("dView").open) fillView();
+  };
+  $("vEdit").onclick = function () { var b = current(); if (b) openEdit(b); };
+  var armed = null, armTimer = null;
+  function disarm() { armed = null; clearTimeout(armTimer); }
+  function confirmClick(btn, fn) {
+    btn.onclick = async function () {
+      var b = current(); if (!b) return;
+      if (armed !== btn) { disarm(); armed = btn; fillView(); btn.textContent = t("again"); armTimer = setTimeout(function () { disarm(); if ($("dView").open) fillView(); }, 3000); return; }
+      disarm(); btn.disabled = true;
+      try { await locked(function () { return fn(b); }); if ($("dView").open) $("dView").close(); view = null; toast(t("cancelled")); }
+      catch (e) { $("vErr").textContent = explain(e); if ($("dView").open) fillView(); }
+      btn.disabled = false;
+    };
+  }
+  confirmClick($("vCancel"), async function (b) {
+    if (b.sid) { var s = await readSeries(b.sid); if (!s.body.skip) s.body.skip = {}; s.body.skip[b.date] = true; await s.ref.set(s.body); }
+    else { var d = await readDay(b.date); delete d.body.bookings[b.id]; await d.ref.set(d.body); }
+  });
+  confirmClick($("vCancelAll"), async function (b) {
+    var s = await readSeries(b.sid), until = addDays(b.date, -1);
+    if (until < s.body.from) await s.ref.delete(); else { s.body.until = until; await s.ref.set(s.body); }
+  });
+
+  /* ---------- find a free room ---------- */
+  function eqChecks(box, prefix, on) {
+    box.textContent = "";
+    Object.keys(EQ).forEach(function (k) {
+      var l = el("label"), c = el("input"); c.type = "checkbox"; c.id = prefix + k; c.value = k; c.checked = (on || []).indexOf(k) >= 0;
+      l.appendChild(c); l.appendChild(document.createTextNode(" " + EQ[k][li()])); box.appendChild(l);
+    });
+  }
+  function checked(box) { return Array.prototype.filter.call(box.querySelectorAll("input"), function (c) { return c.checked; }).map(function (c) { return c.value; }); }
+  $("tFind").onclick = function () {
+    var today = todayKey(), d = S.date < today ? today : S.date, st = startMin();
+    if (d === today) st = Math.min(endMin() - SLOT, Math.max(startMin(), Math.ceil(nowMin() / SLOT) * SLOT));
+    $("fDate").value = d; $("fDate").min = today; $("fDate").max = maxAhead() ? addDays(today, maxAhead()) : "";
+    fillSelect($("fStart"), startOpts(), st);
+    var mx = maxDur() || 480, opts = []; for (var m = SLOT; m <= mx; m += SLOT) opts.push([m, durText(m)]);
+    fillSelect($("fDur"), opts, 60);
+    eqChecks($("fEq"), "fEq_");
+    $("fList").textContent = ""; $("fMsg").textContent = "";
+    $("dFind").showModal();
+  };
+  $("fFind").addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    var date = $("fDate").value, start = +$("fStart").value, dur = +$("fDur").value, cap = parseInt($("fCap").value, 10) || 0, need = checked($("fEq")), list = $("fList");
+    list.textContent = "";
+    if (!isKey(date)) { $("fMsg").textContent = t("eRoomDate"); return; }
+    if (start + dur > endMin()) { $("fMsg").textContent = t("fOver", fmt(endMin())); return; }
+    if (date === todayKey() && start + dur <= nowMin()) { $("fMsg").textContent = t("ePast"); return; }
+    var map;
+    try { map = await dayMap(date); } catch (e) { $("fMsg").textContent = t("fLoad"); return; }
+    var ok = rooms().filter(function (r) {
+      return (!cap || !r.cap || r.cap >= cap) && need.every(function (k) { return (r.eq || []).indexOf(k) >= 0; }) && !clash(date, map, r.id, start, start + dur);
+    });
+    var when = mdw(date) + " " + fmt(start) + "–" + fmt(start + dur);
+    $("fMsg").textContent = ok.length ? t("fRes", when, ok.length) : t("fNone", when);
+    ok.forEach(function (r) {
+      var it = el("div", "item"), l = el("div"), b = el("button", "btn primary small", t("book"));
+      l.appendChild(el("div", "t", r.name)); l.appendChild(el("div", "s", [r.cap ? t("capLine", r.cap) : "", eqText(r)].filter(Boolean).join(" · ")));
+      b.type = "button"; b.onclick = function () { $("dFind").close(); openBook({ date: date, room: r.id, start: start, dur: dur, n: cap }); };
+      it.appendChild(l); it.appendChild(b); list.appendChild(it);
+    });
+  });
+
+  /* ---------- my bookings ---------- */
+  function jump(date, id) {
+    var had = S.rangeLoaded && rangeKey.split(",").indexOf(date.slice(0, 7)) >= 0;
+    S.view = "day"; S.date = date; subscribeRange(); render();
+    if (had && S.rangeLoaded) openView(date, id); else pendingView = { date: date, id: id };
+  }
+  $("tMine").onclick = async function () {
+    var list = $("mList"), msg = $("mMsg"), today = todayKey(), now = nowMin();
+    list.textContent = ""; msg.textContent = t("mLoading"); $("dMine").showModal();
+    if (!S.db || S.myId == null) { msg.textContent = t("mNoId"); return; }
+    var months = [], d = new Date(); d.setDate(1);
+    for (var i = 0; i < 6; i++) { months.push(d.getFullYear() + "-" + pad(d.getMonth() + 1)); d.setMonth(d.getMonth() + 1); }
+    var rows = [];
+    try {
+      var snap = await S.db.collection("days").where("month", "in", months).get();
+      snap.docs.forEach(function (doc) {
+        var bk = (doc.data() || {}).bookings || {};
+        Object.keys(bk).forEach(function (id) {
+          var b = bk[id];
+          if (b && b.by === S.myId && !b.block && (doc.id > today || (doc.id === today && b.end > now))) rows.push({ date: doc.id, id: id, b: b });
+        });
+      });
+    } catch (e) { msg.textContent = t("mFail"); return; }
+    rows.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : a.b.start - b.b.start; });
+    var reps = Object.keys(S.series).filter(function (sid) { var s = S.series[sid]; return s.by === S.myId && !s.block && s.until >= today; });
+    msg.textContent = (rows.length || reps.length) ? t("mSome") : t("mNone");
+    reps.forEach(function (sid) {
+      var s = S.series[sid], next = null;
+      for (var k = s.from > today ? s.from : today; k <= s.until && !next; k = addDays(k, 1)) if (occurs(s, k)) next = k;
+      if (!next) return;
+      var r = roomOf(s.room), it = el("button", "item"), l = el("div"); it.type = "button";
+      l.appendChild(el("div", "t", (s.title || t("vDefault")) + t("mRep")));
+      l.appendChild(el("div", "s", t("mRepLine", capFirst(repLabel(s.freq, s.from)), r ? r.name : "", md(s.until), mdw(next))));
+      it.appendChild(l); it.appendChild(el("span", "mono", span(s)));
+      it.onclick = function () { $("dMine").close(); jump(next, "s:" + sid); };
+      list.appendChild(it);
+    });
+    rows.forEach(function (x) {
+      var r = roomOf(x.b.room), it = el("button", "item"), l = el("div"); it.type = "button";
+      l.appendChild(el("div", "t", x.b.title || t("vDefault")));
+      l.appendChild(el("div", "s", mdw(x.date) + " · " + (r ? r.name : "")));
+      it.appendChild(l); it.appendChild(el("span", "mono", span(x.b)));
+      it.onclick = function () { $("dMine").close(); jump(x.date, x.id); };
+      list.appendChild(it);
+    });
+  };
+
+  /* ---------- usage stats (the month on screen, weekdays only) ---------- */
+  function renderStat() {
+    var days = monthDates(S.date).filter(function (d) { var w = dow(d); return w >= 1 && w <= 5; }), rs = rooms(), sMin = startMin(), eMin = endMin();
+    var open = days.length * (eMin - sMin), per = {}, hours = {}, groups = {}, total = 0;
+    var field = { project: "project", team: "team", user: "name" }[statTab];
+    rs.forEach(function (r) { per[r.id] = { m: 0, c: 0 }; });
+    days.forEach(function (d) {
+      items(d).forEach(function (b) {
+        if (b.block || !per[b.room]) return;
+        var s = Math.max(b.start, sMin), e = Math.min(b.end, eMin); if (e <= s) return;
+        per[b.room].m += e - s; per[b.room].c++; total += e - s;
+        for (var x = s; x < e; x += SLOT) { var h = Math.floor(x / 60); hours[h] = (hours[h] || 0) + SLOT; }
+        if (field) { var key = (field === "name" ? ((b.by && S.names[b.by]) || b.byName || b.name || "") : (b[field] || "")).trim(); if (!groups[key]) groups[key] = { m: 0, c: 0 }; groups[key].m += e - s; groups[key].c++; }
+      });
+    });
+    var hrs = function (m) { return Math.round(m / 6) / 10; };
+    $("stHead").textContent = t("stHead", ym(S.date));
+    Array.prototype.forEach.call($("stTabs").children, function (b) { b.setAttribute("aria-pressed", String(b.dataset.tab === statTab)); });
+    $("stMsg").textContent = t("stBase", days.length, fmt(sMin) + "–" + fmt(eMin)) + " " + t(field ? "stShare" : "stOcc");
+    var box = $("stBody"); box.textContent = "";
+    function rowOf(name, pct, text) {
+      var m = el("div", "meter"), i = el("i"); i.style.width = Math.min(100, pct) + "%"; m.appendChild(i);
+      box.appendChild(el("span", "k", name)); box.appendChild(m); box.appendChild(el("span", "v", text));
+    }
+    if (statTab === "room") {
+      rs.forEach(function (r) { var p = open ? per[r.id].m / open * 100 : 0; rowOf(r.name, p, t("statRoom", Math.round(p), hrs(per[r.id].m), per[r.id].c)); });
+    } else if (statTab === "hour") {
+      for (var h = Math.floor(sMin / 60); h * 60 < eMin; h++) {
+        var cap = days.length * rs.length * (Math.min(eMin, h * 60 + 60) - Math.max(sMin, h * 60)), p = cap ? (hours[h] || 0) / cap * 100 : 0;
+        rowOf(pad(h) + ":00", p, Math.round(p) + "%");
+      }
+    } else {
+      var keys = Object.keys(groups).sort(function (a, b) { return groups[b].m - groups[a].m; });
+      keys.forEach(function (k) { var p = total ? groups[k].m / total * 100 : 0; rowOf(k || t("unspecified"), p, t("statGroup", Math.round(p), hrs(groups[k].m), groups[k].c)); });
+      if (!keys.length) { var e0 = el("p", "why", t("stEmpty")); e0.style.gridColumn = "1 / -1"; box.appendChild(e0); }
+    }
+  }
+  $("tStat").onclick = function () { renderStat(); $("dStat").showModal(); };
+  Array.prototype.forEach.call($("stTabs").children, function (b) { b.onclick = function () { statTab = b.dataset.tab; renderStat(); }; });
+
+  /* ---------- settings ---------- */
+  function roomRow(r) {
+    var set = el("div", "roomset"), row = el("div", "roomrow"), nm = el("input"), cp = el("input"), rm = el("button", "btn", t("del")), eq = el("div", "checks");
+    nm.type = "text"; nm.maxLength = 24; nm.value = r.name || ""; nm.placeholder = t("phRoom"); nm.setAttribute("aria-label", t("phRoom")); nm.id = "sn_" + r.id;
+    cp.type = "number"; cp.min = "0"; cp.max = "999"; cp.value = r.cap || ""; cp.placeholder = t("phCap"); cp.setAttribute("aria-label", t("phCap")); cp.id = "sc_" + r.id;
+    rm.type = "button"; rm.onclick = function () { set.remove(); };
+    eqChecks(eq, "se_" + r.id + "_", r.eq);
+    set.dataset.id = r.id; row.appendChild(nm); row.appendChild(cp); row.appendChild(rm); set.appendChild(row); set.appendChild(eq);
+    return set;
+  }
+  function openSettings() {
+    var box = $("sRooms"); box.textContent = "";
+    rooms().forEach(function (r) { box.appendChild(roomRow(r)); });
+    if (!rooms().length) box.appendChild(roomRow({ id: "r" + Date.now().toString(36), name: "", cap: "" }));
+    [$("sStart"), $("sEnd")].forEach(function (sel, k) {
+      var o = []; for (var h = k ? 1 : 0; h <= (k ? 24 : 23); h++) o.push([h * 60, pad(h) + ":00"]);
+      fillSelect(sel, o, k ? endMin() : startMin());
+    });
+    fillSelect($("sMaxDur"), [[0, t("noLimit")]].concat([60, 120, 180, 240, 360, 480].map(function (m) { return [m, durText(m)]; })), (S.cfg && S.cfg.maxDur != null) ? S.cfg.maxDur : 240);
+    fillSelect($("sAhead"), [[0, t("noLimit")]].concat([7, 14, 30, 60, 90].map(function (d) { return [d, t("nDays", d)]; })), (S.cfg && S.cfg.maxAhead) || 0);
+    $("sProjects").value = cfgList("projects").join(", "); $("sTeams").value = cfgList("teams").join(", ");
+    $("sErr").textContent = ""; $("dSet").showModal();
+  }
+  function splitList(v) { var seen = {}; return v.split(/[,，\n]/).map(function (x) { return x.trim().slice(0, 30); }).filter(function (x) { if (!x || seen[x]) return false; seen[x] = 1; return true; }).slice(0, 60); }
+  $("settings").onclick = openSettings;
+  $("sAdd").onclick = function () { var r = roomRow({ id: "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: "", cap: "" }); $("sRooms").appendChild(r); r.querySelector("input").focus(); };
+  $("fSet").addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    var rs = [];
+    Array.prototype.forEach.call($("sRooms").children, function (set) {
+      var ins = set.querySelector(".roomrow").querySelectorAll("input"), name = ins[0].value.trim();
+      if (name) rs.push({ id: set.dataset.id, name: name, cap: Math.max(0, parseInt(ins[1].value, 10) || 0), eq: checked(set.querySelector(".checks")) });
+    });
+    var s = +$("sStart").value, e = +$("sEnd").value;
+    if (!rs.length) { $("sErr").textContent = t("eNeedRoom"); return; }
+    if (e <= s) { $("sErr").textContent = t("eEndAfter"); return; }
+    try {
+      await S.db.doc("config/main").set({ rooms: rs, startMin: s, endMin: e, maxDur: +$("sMaxDur").value, maxAhead: +$("sAhead").value, projects: splitList($("sProjects").value), teams: splitList($("sTeams").value) });
+      $("dSet").close(); toast(t("setSaved"));
+    } catch (err) { $("sErr").textContent = explain(err); }
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll("[data-close]"), function (b) { b.onclick = function () { b.closest("dialog").close(); }; });
+  Array.prototype.forEach.call($("langs").children, function (b) {
+    b.onclick = function () { S.lang = b.dataset.lang; store("roomBookLang", S.lang); applyStatic(); render(); };
+  });
+
+  /* ---------- data + navigation ---------- */
+  function onDead() { clearTimeout(loadTimer); S.slow = false; S.dead = "dead"; render(); }
+  function subscribeRange() {
+    if (!S.db) return;
+    var months = {}; visibleDates().forEach(function (d) { months[d.slice(0, 7)] = 1; });
+    var list = Object.keys(months).sort(), key = list.join(",");
+    if (key === rangeKey) return;
+    rangeKey = key; S.rangeLoaded = false;
+    if (unsubRange) { unsubRange(); unsubRange = null; }
+    S.days = {};
+    clearTimeout(loadTimer); loadTimer = setTimeout(function () { S.slow = true; render(); }, 10000);
+    var col = S.db.collection("days"), q = list.length === 1 ? col.where("month", "==", list[0]) : col.where("month", "in", list);
+    unsubRange = q.onSnapshot(function (snap) {
+      var days = {};
+      snap.docs.forEach(function (doc) { var x = doc.data() || {}; days[doc.id] = (x.bookings && typeof x.bookings === "object") ? x.bookings : {}; });
+      S.days = days; S.rangeLoaded = true;
+      if (!snap.metadata || !snap.metadata.fromCache) { clearTimeout(loadTimer); S.slow = false; }
+      render();
+      if (pendingView) { var p = pendingView; pendingView = null; openView(p.date, p.id); }
+    }, onDead);
+  }
+  function go(key) { if (!key || key === S.date) return; S.date = key; subscribeRange(); render(); }
+  function setView(v, date) { S.view = v; if (date) S.date = date; store("roomBookView", v); subscribeRange(); render(); }
+  function shift(n) {
+    if (S.view === "month") { var d = parseKey(S.date.slice(0, 8) + "01"); d.setMonth(d.getMonth() + n); go(dateKey(d)); }
+    else go(addDays(S.date, n * (S.view === "week" ? 7 : 1)));
+  }
+  /* 주소에 보기 · 날짜 · 회의실을 적어 둠 (1.42) — 주소를 복사해 보내면 같은 화면이 열림. 날짜가 오늘이면 적지 않음(즐겨찾기 = 늘 오늘)
+     #v=day|week|month  &d=YYYY-MM-DD  &r=<회의실 id>      문 앞 화면은 예전처럼 #door-<회의실 id> */
+  function hashOf() {
+    var p = ["v=" + S.view];
+    if (S.date !== todayKey()) p.push("d=" + S.date);
+    if (S.view !== "day" && S.room) p.push("r=" + encodeURIComponent(S.room));
+    return "#" + p.join("&");
+  }
+  function syncHash() {
+    if (S.door) return;
+    var h = hashOf();
+    if (location.hash !== h) { try { history.replaceState(null, "", h); } catch (e) {} }   /* 뒤로 가기 기록은 늘리지 않음 */
+  }
+  function readHash() {
+    var h = location.hash || "", m = /^#door-([A-Za-z0-9_-]+)$/.exec(h);
+    S.door = m ? m[1] : null;
+    if (S.door) S.date = todayKey();
+    else if (h.length > 1) {
+      var q = {};
+      h.slice(1).split("&").forEach(function (kv) { var i = kv.indexOf("="); if (i > 0) { try { q[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1)); } catch (e) {} } });
+      if (q.v === "day" || q.v === "week" || q.v === "month") S.view = q.v;
+      if (q.v || q.d || q.r) {
+        S.date = isKey(q.d) && dateKey(parseKey(q.d)) === q.d ? q.d : todayKey();
+        S.room = /^[A-Za-z0-9_-]{1,40}$/.test(q.r || "") ? q.r : "";
+      }
+    }
+    subscribeRange(); render();
+  }
+  /* [오늘]: 오늘로 옮기고, 지금 시각 줄이 화면 밖이면 보이는 데까지만 화면을 옮김 */
+  function scrollNow() {
+    var ln = document.querySelector("#sheet .nowline"); if (!ln || !ln.scrollIntoView) return;
+    var r = ln.getBoundingClientRect(), vh = window.innerHeight || document.documentElement.clientHeight;
+    if (r.top < 100 || r.top > vh - 140) ln.scrollIntoView({ block: "nearest" });
+  }
+  $("prev").onclick = function () { shift(-1); };
+  $("next").onclick = function () { shift(1); };
+  $("today").onclick = function () { go(todayKey()); scrollNow(); };
+  $("datelabel").onclick = function () { var p = $("pick"); try { if (p.showPicker) { p.showPicker(); return; } } catch (e) {} p.focus(); };
+  if (!("showPicker" in HTMLInputElement.prototype)) document.documentElement.classList.add("nopicker");   /* 옛 브라우저: 좁은 화면에서도 날짜 칸을 그대로 둠 */
+  /* 좁은 화면의 [더보기] */
+  var moreBtn = $("tMore"), morePanel = $("morePanel");
+  function moreClose(back) { if (!morePanel.classList.contains("open")) return; morePanel.classList.remove("open"); moreBtn.setAttribute("aria-expanded", "false"); if (back) moreBtn.focus(); }
+  moreBtn.onclick = function () {
+    var open = !morePanel.classList.contains("open");
+    morePanel.classList.toggle("open", open); moreBtn.setAttribute("aria-expanded", String(open));
+    if (open) { var f = morePanel.querySelector("button:not([hidden])"); if (f) f.focus(); }
+  };
+  morePanel.addEventListener("click", function (ev) { if (ev.target.closest && ev.target.closest("button")) moreClose(false); });
+  document.addEventListener("click", function (ev) { if (!morePanel.contains(ev.target) && ev.target !== moreBtn) moreClose(false); });
+  document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && !document.querySelector("dialog[open]")) moreClose(true); });
+  $("pick").onchange = function () { if (isKey(this.value)) go(this.value); };
+  Array.prototype.forEach.call($("views").children, function (b) { b.onclick = function () { setView(b.dataset.view); }; });
+  window.addEventListener("hashchange", readHash);
+  /* 창 크기를 바꾸면 월간 달력을 다시 맞춤 (1.41) */
+  var fitTimer = 0;
+  window.addEventListener("resize", function () { if (S.view !== "month" || S.door) return; clearTimeout(fitTimer); fitTimer = setTimeout(render, 120); });
+
+  applyStatic();
+  readHash();
+  setInterval(function () {
+    if (S.door && S.date !== todayKey()) { S.date = todayKey(); subscribeRange(); }
+    if (!document.querySelector("dialog[open]")) render();
+  }, 30000);
+
+  (async function boot() {
+    /* 바깥(인터넷) 판 (ext/fb-store.js). Workspace 계정으로 연결: 누구인지 · 등급 = Workspace 가 서명해 준 표.
+       접속 코드(켰을 때): 누구인지 = 넣은 이름, 설정을 바꿀 수 있는지 = 관리자 코드. */
+    D.xWho = ["이름 · 접속 코드", "Name · access code"]; D.xWsWho = ["내 연결", "My link"]; D.xAdmin = ["관리자 코드", "Admin code"]; D.xAdminOn = ["관리자 (켜짐)", "Admin (on)"];
+    var NR = [D.noRooms, ["등록된 회의실이 없습니다. [관리자 코드]를 넣으면 회의실을 등록할 수 있습니다.", "No rooms have been added yet. Enter the admin code to add rooms."],
+              ["등록된 회의실이 없습니다. 포털 관리자가 회의실을 등록하면 보입니다.", "No rooms have been added yet. A portal admin can add rooms."]];
+    var me;
+    try { me = await EXT.ready(); } catch (e) { S.dead = "noHost"; S.cfgLoaded = true; render(); return; }
+    function apply(m) {
+      S.myId = m.id; S.myName = m.name || ""; S.isOwner = !!m.admin; S.canEdit = !!m.admin; S.canWrite = m.write !== false;
+      S.myProject = m.project || ""; S.myTeam = m.team || "";                           // Workspace 프로필의 프로젝트 · 팀 = 예약 창의 첫 값
+      if (m.name) store("roomBookName", m.name);
+      D.noRooms = NR[m.admin ? 0 : m.ws ? 2 : 1];
+    }
+    apply(me);
+    [["xWho", function () { EXT.change(); }], ["xAdmin", function () { EXT.admin(); }]].forEach(function (x) {
+      var b = document.createElement("button"); b.className = "btn"; b.type = "button"; b.id = x[0]; b.dataset.t = x[0] === "xAdmin" && me.admin ? "xAdminOn" : x[0] === "xWho" && me.ws ? "xWsWho" : x[0]; b.onclick = x[1];
+      if (x[0] === "xAdmin" && me.ws) b.hidden = true;                                   // Workspace 계정: 관리자는 Workspace 등급을 따름 (관리자 코드 없음)
+      $("morePanel").appendChild(b);
+    });
+    applyStatic();
+    EXT.onUpdate = function (m) { apply(m); $("xAdmin").dataset.t = m.admin ? "xAdminOn" : "xAdmin"; applyStatic(); render(); };
+    EXT.onDenied = function () { S.dead = "signIn"; render(); EXT.rejoin(); };
+    S.db = LWDB;
+    S.db.doc("config/main").onSnapshot(function (snap) { S.cfg = snap.exists ? snap.data() : null; S.cfgLoaded = true; render(); }, onDead);
+    S.db.collection("series").onSnapshot(function (snap) {
+      var all = {}; snap.docs.forEach(function (doc) { all[doc.id] = doc.data() || {}; });
+      S.series = all; render();
+    }, onDead);
+    subscribeRange(); render();
+  })();
+})();
+</script>
+</body>
+</html>
