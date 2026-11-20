@@ -463,7 +463,7 @@ var EXT = (function () {
   var TOKEN_URL = (CFG && CFG.tokenURL) || "https://securetoken.googleapis.com/v1";
   var ROOT = "/mr", POLL = 5000;
   var LOGIN = CFG && (CFG.login === "ws" || CFG.login === "both") ? CFG.login : "code";   // ws = Workspace 계정만 · both = 접속 코드도 · code = 접속 코드만(0.1 의 config.js)
-  var VER = "0.2.0";                                         // build.py 가 넣음
+  var VER = "0.3.0";                                         // build.py 가 넣음
   var api = { onUpdate: null, onDenied: null, version: VER };
 
   function load(k) { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } }
@@ -472,8 +472,9 @@ var EXT = (function () {
   var tx = function (ko, e) { return en() ? e : ko; };
   var auth = load("mrx.auth");          // {uid, idToken, refreshToken, exp, at, ws?}
   var who = load("mrx.me");             // 접속 코드: {name, code, admin} · Workspace 계정: {ws: 1, id, name, lv, until, pj, tm}
+  var IMP = /[#&]imp=1(?:&|$)/.test(location.hash);   // 0.3: Workspace 의 [전환] · [자료 옮기기]로 열림 → 들어간 뒤 사내 자료를 받아 가져오기 창을 띄움
   var T0 = tokenIn(location.hash);      // Workspace 에서 넘어온 연결 표(#t=…). 화면의 다른 코드가 주소를 만지기 전에 꺼내고, 주소에서는 바로 지움
-  if (T0) { try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { try { location.hash = ""; } catch (e2) {} } }
+  if (T0 || IMP) { try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { try { location.hash = ""; } catch (e2) {} } }
   function fail(status, message) { var e = new Error(message || ("HTTP " + status)); e.status = status; return e; }
 
   /* ---------- 통신 ---------- */
@@ -778,6 +779,104 @@ var EXT = (function () {
     o.querySelector("#xForget").onclick = function () { save("mrx.me", null); save("mrx.auth", null); location.reload(); };
     o.querySelector("#xCancel").focus();
   }
+  /* ---------- 0.3: 사내(Workspace) 회의실 예약 가져오기 — 포털 관리자만. 받은 자료로 '바꿈'(합치지 않음) ---------- */
+  function countDays(doc) { var n = 0; Object.keys(doc || {}).forEach(function (d) { var b = doc[d] && doc[d].bookings; if (b && typeof b === "object") n += Object.keys(b).length; }); return n; }
+  function checkImport(x) {                                            // 받은 것이 Workspace 가 내보낸 모양인지. 맞으면 "", 아니면 까닭
+    var bad = tx("Workspace 에서 내보낸 회의실 예약 자료가 아닙니다.", "This is not meeting-room data exported from Workspace.");
+    if (!x || typeof x !== "object" || x.v !== 1 || x.from !== "workspace") return bad;
+    if (x.config !== null && (typeof x.config !== "object" || Array.isArray(x.config) || !Array.isArray(x.config.rooms))) return bad;
+    if (!x.days || typeof x.days !== "object" || Array.isArray(x.days) || !x.series || typeof x.series !== "object" || Array.isArray(x.series)) return bad;
+    var ms = Object.keys(x.days);
+    for (var i = 0; i < ms.length; i++) if (!/^\d{4}-\d{2}$/.test(ms[i]) || !x.days[ms[i]] || typeof x.days[ms[i]] !== "object" || Array.isArray(x.days[ms[i]])) return bad;
+    if (ms.length > 600) return bad;
+    return "";
+  }
+  async function importNow() {                                         // 지금 인터넷 판에 들어 있는 것 (무엇이 지워지는지 보여 주려고)
+    var r = await db("GET", "/r"); if (r.status !== 200) throw fail(403, tx("자료를 읽을 수 없습니다.", "Cannot read the data."));
+    var have = Object.keys(r.json || {}).filter(function (k) { return /^days_\d{4}-\d{2}$/.test(k); }).map(function (k) { return k.slice(5); }), n = 0;
+    for (var i = 0; i < have.length; i++) n += countDays((await readDoc("days." + have[i])).v);
+    var c = (await readDoc("config.main")).v;
+    return { months: have, bookings: n, rooms: c && Array.isArray(c.rooms) ? c.rooms.length : 0 };
+  }
+  async function importApply(x, have, say) {                           // 회의실 설정 → 반복 예약 → 달마다. 받은 자료에 없는 달은 비움 (문서를 지울 수는 없으므로 빈 것으로)
+    var ms = Object.keys(x.days).sort(), rest = have.filter(function (m) { return !(m in x.days); }), total = ms.length + rest.length + 2, done = 0, i;
+    if (x.config) await store.set("config.main", x.config);
+    say(++done, total);
+    await store.set("series", x.series || {}); say(++done, total);
+    for (i = 0; i < ms.length; i++) { await store.set("days." + ms[i], x.days[ms[i]]); say(++done, total); }
+    for (i = 0; i < rest.length; i++) { await store.set("days." + rest[i], {}); say(++done, total); }
+  }
+  function importDialog(auto) {
+    var admin = !!(who && who.ws && who.lv === "a"), opener = null; try { opener = auto && window.opener ? window.opener : null; } catch (e) {}
+    var tell = function (m) { if (opener) { try { opener.postMessage(m, "*"); } catch (e) {} } };   // 받는 쪽(Workspace 화면)의 주소는 여기서 알 수 없어 * — 보내는 것은 진행 상태뿐
+    var o = box('<h2 id="xTitle" style="margin:0 0 8px;font-size:19px">' + tx("사내 예약 가져오기", "Import in-house bookings") + "</h2>" +
+      '<p id="xImpS" role="status" style="margin:0 0 10px;font-size:14px"></p>' +
+      '<div id="xImpP" hidden style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--line,#ddd);border-radius:8px;font-size:14px"></div>' +
+      '<p id="xImpFw" style="margin:0 0 12px;font-size:13.5px"><label for="xImpF">' + tx("내보낸 파일에서 가져오기 (meeting-room-export.json)", "Import from an exported file (meeting-room-export.json)") + '</label><br><input type="file" id="xImpF" accept=".json,application/json" style="margin-top:4px;max-width:100%"></p>' +
+      '<p id="xMsg" role="alert" style="min-height:1.4em;margin:0 0 10px;color:var(--busy,#b8371a);font-size:13.5px"></p>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button type="button" id="xCancel" ' + BTN2 + ">" + tx("닫기", "Close") + '</button><button type="button" id="xGo" disabled ' + BTN + ">" + tx("가져오기", "Import") + "</button></div>" +
+      '<p style="margin:12px 0 0;font-size:12.5px;color:var(--muted,#666)"><span id="xVer">v' + VER + "</span></p>");
+    var st = o.querySelector("#xImpS"), pv = o.querySelector("#xImpP"), msg = o.querySelector("#xMsg"), go = o.querySelector("#xGo"), data = null, now = null, timer = null, busy = false, finished = false;
+    function close() { clearInterval(timer); window.removeEventListener("message", onMsg); o.remove(); }
+    o.querySelector("#xCancel").onclick = function () { if (busy) return; if (!finished) tell({ type: "mrx-import-cancel" }); close(); };
+    if (!admin) { st.textContent = tx("포털 관리자 계정으로 연결했을 때만 가져올 수 있습니다.", "Only a portal-admin account can import."); o.querySelector("#xImpFw").hidden = true; return; }
+    async function show(x, from) {
+      var err = checkImport(x); msg.textContent = "";
+      if (err) { msg.textContent = err; return; }
+      clearInterval(timer); st.textContent = tx("지금 인터넷 판에 들어 있는 것을 확인하는 중…", "Checking what the internet version holds now…");
+      try { now = await importNow(); } catch (e) { msg.textContent = e.status === 0 ? await why(e) : (e.message || String(e)); st.textContent = ""; return; }
+      data = x;
+      var ms = Object.keys(x.days), nb = 0; ms.forEach(function (m) { nb += countDays(x.days[m]); });
+      data._n = { rooms: x.config ? x.config.rooms.length : 0, bookings: nb, series: Object.keys(x.series).length, months: ms.length };
+      st.textContent = tx("받은 자료를 확인하고 [가져오기]를 누르세요.", "Check what was received, then press Import.");
+      pv.hidden = false; pv.textContent = "";
+      var l1 = document.createElement("div"), l2 = document.createElement("div"); l2.style.marginTop = "6px"; l2.style.color = "var(--busy,#b8371a)";
+      l1.id = "xImpIn"; l2.id = "xImpOut";
+      l1.textContent = tx("받은 자료(사내): 회의실 " + data._n.rooms + "개 · 예약 " + nb + "건 · 반복 " + data._n.series + "건", "Received (in-house): " + data._n.rooms + " rooms · " + nb + " bookings · " + data._n.series + " repeats");
+      l2.textContent = tx("지금 인터넷 판: 회의실 " + now.rooms + "개 · 예약 " + now.bookings + "건 → 지워지고 받은 자료로 바뀝니다." + (x.config ? "" : " (사내에 회의실 설정이 없어 회의실은 그대로 둡니다)"),
+        "Internet version now: " + now.rooms + " rooms · " + now.bookings + " bookings → these are removed and replaced." + (x.config ? "" : " (no room settings in-house, so rooms stay)"));
+      pv.appendChild(l1); pv.appendChild(l2);
+      o.querySelector("#xImpFw").hidden = !!from;                      // Workspace 에서 받았으면 파일 고르기는 접어 둠
+      if (from) { var l0 = document.createElement("div"); l0.id = "xImpFrom"; l0.style.cssText = "margin-top:6px;font-size:12.5px;color:var(--muted,#666);overflow-wrap:anywhere"; l0.textContent = tx("보낸 곳: ", "Sent from: ") + from; pv.appendChild(l0); }   // 어느 화면이 보냈는지 — 우리 Workspace 주소가 맞는지 눈으로 확인
+      go.disabled = false; go.focus();
+    }
+    function onMsg(ev) {
+      if (!opener || ev.source !== opener || !ev.data || ev.data.type !== "mrx-import-data" || data || busy) return;   // 이 창을 연 Workspace 화면이 보낸 것만
+      show(ev.data.data, String(ev.origin || ""));
+    }
+    o.querySelector("#xImpF").onchange = function () {
+      var f = this.files && this.files[0]; if (!f || busy) return;
+      if (f.size > 30 * 1024 * 1024) { msg.textContent = tx("파일이 너무 큽니다.", "The file is too large."); return; }
+      var rd = new FileReader();
+      rd.onload = function () { var x = null; try { x = JSON.parse(String(rd.result)); } catch (e) {} data = null; go.disabled = true; pv.hidden = true; show(x, ""); };
+      rd.onerror = function () { msg.textContent = tx("파일을 읽지 못했습니다.", "Could not read the file."); };
+      rd.readAsText(f);
+    };
+    go.onclick = async function () {
+      if (!data || busy) return;
+      busy = true; go.disabled = true; o.querySelector("#xCancel").disabled = true; o.querySelector("#xImpF").disabled = true; msg.textContent = "";
+      try {
+        await importApply(data, now.months, function (d, t) { st.textContent = tx("가져오는 중… " + d + " / " + t, "Importing… " + d + " / " + t); });
+        finished = true; tell({ type: "mrx-import-done", counts: data._n });
+        st.textContent = tx("가져왔습니다. 화면을 다시 엽니다…", "Imported. Reloading…");
+        setTimeout(function () { location.reload(); }, 1200);
+      } catch (e) {
+        busy = false; go.disabled = false; o.querySelector("#xCancel").disabled = false; o.querySelector("#xImpF").disabled = false;
+        msg.textContent = (e.status === 0 ? await why(e) : (e.message || String(e))) + tx(" — 다시 눌러 이어서 할 수 있습니다.", " — press again to continue.");
+      }
+    };
+    if (opener) {
+      st.textContent = tx("Workspace 에서 사내 자료를 받는 중…", "Receiving the in-house data from Workspace…");
+      window.addEventListener("message", onMsg);
+      var tries = 0; tell({ type: "mrx-import-ready", ver: VER });
+      timer = setInterval(function () {
+        if (data || busy) { clearInterval(timer); return; }
+        if (++tries > 45) { clearInterval(timer); st.textContent = tx("Workspace 화면에서 자료가 오지 않았습니다. 그 화면의 [파일로 내보내기]로 받은 파일을 아래에서 고르세요.", "No data came from the Workspace page. Use Export to file there and choose the file below."); return; }
+        tell({ type: "mrx-import-ready", ver: VER });
+      }, 1000);
+    } else st.textContent = tx("Workspace 의 [회의실 예약 (인터넷)] 화면 → [파일로 내보내기]로 받은 파일을 고르세요.", "Choose the file from Export to file on the Workspace page (Meeting Rooms (internet)).");
+  }
+
   function setup() {                                                   // config.js 가 아직 없을 때: 설정 파일을 만들어 주는 화면
     var o = box('<h2 id="xTitle" style="margin:0 0 6px;font-size:19px">처음 설정 · First setup</h2>' +
       '<p style="margin:0 0 10px;font-size:13.5px">이 화면은 아직 저장소(Firebase)와 연결되지 않았습니다. 아래에서 설정 파일 두 개를 만들어 <b>Setup_Guide.html</b>(설치 안내)의 순서대로 쓰세요. <span id="xVer" style="color:var(--muted,#666)">v' + VER + '</span></p>' +
@@ -838,6 +937,8 @@ var EXT = (function () {
   };
   api.change = async function () { if (who && who.ws) { wsInfo(); return; } if (await join(false)) { if (api.onUpdate) api.onUpdate(meOut()); } };
   api.admin = adminAsk;
+  api.wantImport = IMP;
+  api.importOpen = importDialog;
   api.rejoin = async function () {
     if ((who && who.ws) || LOGIN === "ws") {
       var how = await needLink(tx("연결 기간이 끝났거나 연결이 끊겼습니다. Workspace 에서 다시 연결하세요.", "The link period has ended or the link is gone. Link again from Workspace."));
@@ -2097,7 +2198,7 @@ var LWDB = (function () {
   (async function boot() {
     /* 바깥(인터넷) 판 (ext/fb-store.js). Workspace 계정으로 연결: 누구인지 · 등급 = Workspace 가 서명해 준 표.
        접속 코드(켰을 때): 누구인지 = 넣은 이름, 설정을 바꿀 수 있는지 = 관리자 코드. */
-    D.xWho = ["이름 · 접속 코드", "Name · access code"]; D.xWsWho = ["내 연결", "My link"]; D.xAdmin = ["관리자 코드", "Admin code"]; D.xAdminOn = ["관리자 (켜짐)", "Admin (on)"];
+    D.xWho = ["이름 · 접속 코드", "Name · access code"]; D.xWsWho = ["내 연결", "My link"]; D.xAdmin = ["관리자 코드", "Admin code"]; D.xAdminOn = ["관리자 (켜짐)", "Admin (on)"]; D.xImport = ["사내 예약 가져오기", "Import in-house bookings"];
     var NR = [D.noRooms, ["등록된 회의실이 없습니다. [관리자 코드]를 넣으면 회의실을 등록할 수 있습니다.", "No rooms have been added yet. Enter the admin code to add rooms."],
               ["등록된 회의실이 없습니다. 포털 관리자가 회의실을 등록하면 보입니다.", "No rooms have been added yet. A portal admin can add rooms."]];
     var me;
@@ -2109,13 +2210,14 @@ var LWDB = (function () {
       D.noRooms = NR[m.admin ? 0 : m.ws ? 2 : 1];
     }
     apply(me);
-    [["xWho", function () { EXT.change(); }], ["xAdmin", function () { EXT.admin(); }]].forEach(function (x) {
+    [["xWho", function () { EXT.change(); }], ["xAdmin", function () { EXT.admin(); }], ["xImport", function () { EXT.importOpen(false); }]].forEach(function (x) {
       var b = document.createElement("button"); b.className = "btn"; b.type = "button"; b.id = x[0]; b.dataset.t = x[0] === "xAdmin" && me.admin ? "xAdminOn" : x[0] === "xWho" && me.ws ? "xWsWho" : x[0]; b.onclick = x[1];
+      if (x[0] === "xImport" && !(me.ws && me.admin)) b.hidden = true;                   // 0.3: 사내 예약 가져오기 — Workspace 의 포털 관리자만
       if (x[0] === "xAdmin" && me.ws) b.hidden = true;                                   // Workspace 계정: 관리자는 Workspace 등급을 따름 (관리자 코드 없음)
       $("morePanel").appendChild(b);
     });
     applyStatic();
-    EXT.onUpdate = function (m) { apply(m); $("xAdmin").dataset.t = m.admin ? "xAdminOn" : "xAdmin"; applyStatic(); render(); };
+    EXT.onUpdate = function (m) { apply(m); $("xAdmin").dataset.t = m.admin ? "xAdminOn" : "xAdmin"; $("xImport").hidden = !(m.ws && m.admin); applyStatic(); render(); };
     EXT.onDenied = function () { S.dead = "signIn"; render(); EXT.rejoin(); };
     S.db = LWDB;
     S.db.doc("config/main").onSnapshot(function (snap) { S.cfg = snap.exists ? snap.data() : null; S.cfgLoaded = true; render(); }, onDead);
@@ -2124,6 +2226,7 @@ var LWDB = (function () {
       S.series = all; render();
     }, onDead);
     subscribeRange(); render();
+    if (EXT.wantImport) EXT.importOpen(true);                                            // 0.3: Workspace 의 [전환] · [자료 옮기기]로 열린 탭 → 사내 자료를 받아 가져오기 창
   })();
 })();
 </script>
