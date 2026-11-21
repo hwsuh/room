@@ -71,6 +71,9 @@ h1 { font-family: var(--font-display); font-weight: 800; font-size: 24px; margin
 .btn:hover { border-color: var(--accent); }
 .btn.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--accent-ink); font-weight: 600; }
 .btn.danger { color: var(--busy); border-color: var(--busy); }
+.btn.danger.solid { background: var(--busy); color: #fff; }
+.ask { border: 1.5px solid var(--busy); border-radius: 10px; padding: 10px 12px; margin: 8px 0 4px; background: var(--busy-soft, #FBE7E1); }
+.ask p { margin: 0 0 8px; font-weight: 600; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn.icon { padding: 7px 10px; font-family: var(--font-mono); }
 .btn.small { padding: 3px 9px; font-size: 13px; }
@@ -374,7 +377,11 @@ body{word-break:keep-all;overflow-wrap:break-word}
   <div class="meta"><span id="vRoom"></span><span class="big" id="vTime"></span><span id="vName"></span><span class="why" id="vGroup"></span><span class="why" id="vRep"></span></div>
   <p class="why" id="vWhy"></p>
   <p class="err" id="vErr"></p>
-  <div class="row">
+  <div class="ask" id="vAsk" hidden role="alertdialog" aria-labelledby="vAskT">
+    <p id="vAskT"></p>
+    <div class="row"><button type="button" class="btn" id="vAskNo"></button><button type="button" class="btn danger solid" id="vAskYes"></button></div>
+  </div>
+  <div class="row" id="vBtns">
     <button type="button" class="btn" data-close data-t="close"></button>
     <button type="button" class="btn danger" id="vCancelAll" hidden></button>
     <button type="button" class="btn danger" id="vCancel"></button>
@@ -463,7 +470,7 @@ var EXT = (function () {
   var TOKEN_URL = (CFG && CFG.tokenURL) || "https://securetoken.googleapis.com/v1";
   var ROOT = "/mr", POLL = 5000;
   var LOGIN = CFG && (CFG.login === "ws" || CFG.login === "both") ? CFG.login : "code";   // ws = Workspace 계정만 · both = 접속 코드도 · code = 접속 코드만(0.1 의 config.js)
-  var VER = "0.4.0";                                         // build.py 가 넣음
+  var VER = "0.4.1";                                         // build.py 가 넣음
   var api = { onUpdate: null, onDenied: null, version: VER };
 
   function load(k) { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } }
@@ -1206,7 +1213,11 @@ var LWDB = (function () {
     eQuota: ["저장 공간이 가득 찼습니다. 관리자에게 알려 주세요.", "Storage is full. Tell the admin."], eSave: ["저장하지 못했습니다. 잠시 후 다시 시도하세요.", "Could not save. Try again in a moment."],
     vDefault: ["회의실 예약", "Room booking"], byLine: ["예약자 {0}", "Booked by {0}"], regLine: ["등록 {0}", "Set by {0}"], attend: [" · 참석 {0}명", " · {0} attendees"],
     repLine: ["{0} 반복 · {1}까지", "Repeats {0} · until {1}"], cancel: ["예약 취소", "Cancel booking"], cancelOne: ["이 날만 취소", "Cancel this day only"],
-    cancelAll: ["이 날부터 모두 취소", "Cancel this and following"], unblock: ["사용 불가 해제", "Remove block"], again: ["한 번 더 누르면 취소", "Press again to cancel"],
+    cancelAll: ["이 날부터 모두 취소", "Cancel this and following"], unblock: ["사용 불가 해제", "Remove block"], askOne: ["{0} {1} 예약을 취소할까요?", "Cancel the booking on {0} at {1}?"], askDay: ["반복 예약 가운데 {0} 하루만 취소할까요? 다른 날은 그대로 둡니다.", "Cancel only {0} of this repeating booking? Other days stay."],
+    askAll: ["{0}부터 반복 예약을 모두 취소할까요? (남은 {1}회) {2}까지의 예약은 그대로 남습니다.", "Cancel this repeating booking from {0} on? ({1} left) Bookings up to {2} stay."],
+    askWhole: ["반복 예약 전체({0}회)를 취소할까요?", "Cancel the whole repeating booking ({0} in all)?"], askBlock: ["사용 불가 시간을 해제할까요?", "Remove this unavailable time?"],
+    yesCancel: ["취소하기", "Cancel it"], yesAll: ["모두 취소하기", "Cancel them all"], yesUnblock: ["해제하기", "Remove"], noBack: ["돌아가기", "Go back"],
+    doneAll: ["{0}부터 반복 예약 {1}회를 취소했습니다.", "Cancelled {1} from {0} on."], doneDay: ["{0} 하루만 취소했습니다.", "Cancelled {0} only."],
     extTo: ["30분 연장 ({0}까지)", "Extend 30 min (until {0})"], canExt: ["뒤 30분이 비어 있어 연장할 수 있습니다.", "The next 30 min is free, so you can extend."],
     extOnly: [" 연장은 이 날에만 적용됩니다.", " The extension applies to this day only."], adminBlock: ["관리자가 막아 둔 시간입니다.", "An admin marked this time unavailable."],
     ownerOnly: ["예약한 사람과 관리자만 바꿀 수 있습니다.", "Only the person who booked it or an admin can change it."],
@@ -1995,23 +2006,44 @@ var LWDB = (function () {
     if ($("dView").open) fillView();
   };
   $("vEdit").onclick = function () { var b = current(); if (b) openEdit(b); };
-  var armed = null, armTimer = null;
-  function disarm() { armed = null; clearTimeout(armTimer); }
-  function confirmClick(btn, fn) {
-    btn.onclick = async function () {
+  /* 1.53: 취소는 창 안의 확인 칸으로 묻고(시간 제한 없음), 무엇이 취소되는지 적어 보여 줌.
+     (전에는 한 번 누르면 '한 번 더 누르면 취소'로 바뀌고 3초 안에 다시 누르지 않으면 원래대로 돌아가서, 읽고 누르면 아무 일도 없는 것처럼 보였음) */
+  var armed = null;
+  function left(s, from) { var n = 0; for (var k = from; k <= s.until && n < 2000; k = addDays(k, 1)) if (occurs(s, k)) n++; return n; }
+  function disarm() { armed = null; $("vAsk").hidden = true; $("vBtns").hidden = false; }
+  function confirmClick(btn, kind, fn) {
+    btn.onclick = function () {
       var b = current(); if (!b) return;
-      if (armed !== btn) { disarm(); armed = btn; fillView(); btn.textContent = t("again"); armTimer = setTimeout(function () { disarm(); if ($("dView").open) fillView(); }, 3000); return; }
-      disarm(); btn.disabled = true;
-      try { await locked(function () { return fn(b); }); if ($("dView").open) $("dView").close(); view = null; toast(t("cancelled")); }
-      catch (e) { $("vErr").textContent = explain(e); if ($("dView").open) fillView(); }
-      btn.disabled = false;
+      var s = b.sid ? S.series[b.sid] : null, msg, yes;
+      if (kind === "all" && s) {
+        var n = left(s, b.date);
+        msg = b.date <= s.from ? t("askWhole", n) : t("askAll", md(b.date), n, md(addDays(b.date, -1))); yes = t("yesAll");
+      } else if (b.sid) { msg = t("askDay", mdw(b.date)); yes = t("yesCancel"); }
+      else if (b.block) { msg = t("askBlock"); yes = t("yesUnblock"); }
+      else { msg = t("askOne", mdw(b.date), span(b)); yes = t("yesCancel"); }
+      armed = { kind: kind, fn: fn, n: s ? left(s, b.date) : 0, btn: btn };
+      $("vAskT").textContent = msg; $("vAskYes").textContent = yes; $("vAskNo").textContent = t("noBack");
+      $("vBtns").hidden = true; $("vAsk").hidden = false; $("vErr").textContent = "";
+      $("vAskYes").focus();
     };
   }
-  confirmClick($("vCancel"), async function (b) {
+  $("vAskNo").onclick = function () { var a = armed; disarm(); if (current() && $("dView").open) { fillView(); if (a && a.btn) a.btn.focus(); } };
+  $("vAskYes").onclick = async function () {
+    var b = current(), a = armed; if (!b || !a) return;
+    var btn = this; btn.disabled = true;
+    try {
+      await locked(function () { return a.fn(b); });
+      disarm(); if ($("dView").open) $("dView").close(); view = null;
+      toast(a.kind === "all" ? t("doneAll", md(b.date), a.n) : (b.sid ? t("doneDay", md(b.date)) : t("cancelled")));
+    }
+    catch (e) { disarm(); $("vErr").textContent = explain(e); if ($("dView").open) fillView(); }
+    btn.disabled = false;
+  };
+  confirmClick($("vCancel"), "one", async function (b) {
     if (b.sid) { var s = await readSeries(b.sid); if (!s.body.skip) s.body.skip = {}; s.body.skip[b.date] = true; await s.ref.set(s.body); }
     else { var d = await readDay(b.date); delete d.body.bookings[b.id]; await d.ref.set(d.body); }
   });
-  confirmClick($("vCancelAll"), async function (b) {
+  confirmClick($("vCancelAll"), "all", async function (b) {
     var s = await readSeries(b.sid), until = addDays(b.date, -1);
     if (until < s.body.from) await s.ref.delete(); else { s.body.until = until; await s.ref.set(s.body); }
   });
